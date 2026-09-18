@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>my3dmaps</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<header>
+  <h1>my3dmaps</h1>
+  <label>Project <input id="projName" value="untitled" size="16"></label>
+  <label>Preset <select id="presetSelect"><option value="">(choose)</option></select></label>
+  <button id="btnSavePreset" title="Save current settings as a preset (presets/&lt;name&gt;.json)">Save preset</button>
+  <span class="spacer"></span>
+  <button id="btnBuild" class="primary">Build 3MF / STL</button>
+  <button id="btnBuildSlice" title="Also run OrcaSlicer headlessly (needs slicer settings in the project)">Build + slice</button>
+  <span id="status" class="status"></span>
+</header>
+
+<main>
+  <section id="left">
+    <div id="map"></div>
+    <div class="panel">
+      <h2>Area &amp; scale</h2>
+      <div class="row">
+        <label>Scale 1:<select id="scaleSelect"></select></label>
+        <label>Tiles <input id="tilesX" type="number" min="1" max="6" value="1" class="tiny"> ×
+          <input id="tilesY" type="number" min="1" max="6" value="1" class="tiny"></label>
+        <label>Tile <span id="tileMm">200</span> mm</label>
+      </div>
+      <div class="row info" id="areaInfo">Drag the centre pin to move; drag the corner handle to change scale.</div>
+      <div class="row">
+        <label>Centre <input id="centerLat" class="num" step="0.0001" type="number"> , <input id="centerLon" class="num" step="0.0001" type="number"></label>
+        <button id="btnFit" title="Zoom the map to the tile grid">Fit</button>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Bands <small id="bandStatus"></small></h2>
+      <div class="row">
+        <label>Base <select id="baseColor">
+          <option value="blue">blue (doubles as water)</option>
+          <option value="black">black</option>
+          <option value="none">none (lowest band)</option></select></label>
+        <label>&gt;4 colors <select id="overflow">
+          <option value="merge">merge least distinct</option>
+          <option value="swap">manual mid-print swap</option></select></label>
+      </div>
+      <div class="row">
+        <label title="Rivers, canals and streams from OpenStreetMap (ODbL: credit © OpenStreetMap contributors), painted as a thin blue skin on the surface"><input id="rivers" type="checkbox"> rivers (OSM)</label>
+        <label title="Streams are only fetched at 1:60,000 or larger scales"><input id="riverStreams" type="checkbox"> + streams</label>
+        <label title="Narrowest printed river; 1.2 mm ≈ 3 lines of a 0.4 mm nozzle">min <input id="riverWidth" type="number" step="0.1" min="0.3" max="20" class="tiny"> mm</label>
+        <label title="Multiplier on real river widths (1.0 = true to scale, wider than the minimum only for big rivers)">× <input id="riverScale" type="number" step="0.25" min="0.25" max="10" class="tiny"></label>
+      </div>
+      <div class="row">
+        <label title="Built-up areas (residential/industrial/commercial/retail land use) and major roads from OpenStreetMap, painted as a thin dark-grey skin. Off by default: natural terrain usually reads better and it costs a filament colour."><input id="urban" type="checkbox"> urban (OSM)</label>
+        <label title="Also paint motorways, trunk and primary roads"><input id="urbanRoads" type="checkbox"> + major roads</label>
+        <label title="Urban colour"><input id="urbanColor" type="color"></label>
+      </div>
+      <table id="bands"><thead><tr><th></th><th>Band</th><th>From</th><th>Slope ≥</th><th>Status</th></tr></thead><tbody></tbody></table>
+      <div class="row info" id="mergeInfo"></div>
+    </div>
+  </section>
+
+  <section id="right">
+    <div id="viewer"></div>
+    <div class="panel">
+      <h2>Height</h2>
+      <div class="row">
+        <label class="grow">Exaggeration <span id="exagVal">1.0</span>×
+          <input id="exag" type="range" min="0.5" max="8" step="0.05" value="1"></label>
+        <label><input id="exagAuto" type="checkbox" checked> auto</label>
+        <button id="btnSuggest" title="Use the suggested value for this region">suggest</button>
+        <label title="Draft print: one filament, one object per tile"><input id="mono" type="checkbox"> single-colour draft</label>
+        <label title="XY scale-up so cooled tiles measure the nominal size and glue edge to edge (e.g. 0.3 for PLA). Leave 0 if the slicer filament profile already compensates."><span>shrink</span> <input id="shrink" type="number" step="0.05" min="-2" max="5" class="tiny"> %</label>
+      </div>
+      <div class="row info" id="heightInfo"></div>
+    </div>
+    <div class="panel">
+      <h2>Jobs</h2>
+      <div id="jobs" class="jobs"></div>
+    </div>
+    <div class="panel small">
+      <details><summary>Data &amp; licensing</summary>
+        <p>Elevation: NASA/USGS SRTM 1 Arc-Second Global (public domain). Lakes &amp; coast: Natural Earth (public domain).
+        Rivers and the urban layer (when enabled): © OpenStreetMap contributors, ODbL – a model containing them must carry that credit
+        when shared; untick "rivers" and "urban" for a strictly public-domain model. Map tiles on this page: © OpenStreetMap contributors (display only).</p>
+        <p id="demInfo"></p>
+      </details>
+    </div>
+  </section>
+</main>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "my3dmaps"
+version = "0.1.0"
+description = "Turn open topographic data into multi-colour 3D-printable landscape tiles"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+  "numpy>=1.26",
+  "scipy>=1.11",
+  "shapely>=2.0",
+  "pyproj>=3.6",
+  "pyshp>=2.3",
+  "requests>=2.31",
+  "pyyaml>=6.0",
+  "fastapi>=0.110",
+  "uvicorn>=0.27",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx>=0.27"]
+render = ["playwright>=1.40"]  # tools/render_tiles.py (plus `playwright install chromium`)
+
+[project.scripts]
+my3dmaps = "my3dmaps.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["my3dmaps*"]
+
+[tool.setuptools.package-data]
+my3dmaps = ["web/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

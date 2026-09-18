@@ -1,0 +1,36 @@
+{
+  "name": "liverpool",
+  "notes": "Liverpool and the Mersey estuary with the Wirral. Low relief: exercises band auto-pruning (rock/snow dropped) and heavy exaggeration. 2x2 tiles at 1:50,000 = 10 km per tile.",
+  "center_lat": 53.40,
+  "center_lon": -2.98,
+  "scale": 50000,
+  "tiles_x": 2,
+  "tiles_y": 2,
+  "tile_mm": 200,
+  "exaggeration": null,
+  "base_mm": 3.0,
+  "max_height_mm": 180,
+  "pitch_mm": 0.5,
+  "dem_source": "srtmgl1",
+  "water": true,
+  "rivers": {"enabled": true, "source": "osm", "classes": ["river", "canal", "stream"], "stream_max_scale": 60000, "min_width_mm": 1.2, "width_scale": 1.0, "depth_mm": 0.6, "default_width_m": {"river": 30, "canal": 15, "stream": 5}},
+  "urban": {"enabled": false, "source": "osm", "color": "#4a4a4a", "label": "Urban", "landuse": ["residential", "industrial", "commercial", "retail"], "roads": ["motorway", "trunk", "primary"], "road_min_width_mm": 1.2, "road_width_scale": 1.0, "road_default_width_m": {"motorway": 30, "trunk": 20, "primary": 12}, "depth_mm": 0.6},
+  "shrinkage_pct": 0.0,
+  "palette": {
+    "name": "lowland",
+    "base_color": "blue",
+    "skin_depth_mm": 1.2,
+    "min_fraction": 0.003,
+    "overflow": "merge",
+    "max_slots": 4,
+    "bands": [
+      {"id": "water", "label": "Water", "color": "#1f5fbf", "kind": "water"},
+      {"id": "sand", "label": "Shore / tidal flats", "color": "#d9c58c", "from_water_m": 0, "requires_water": true, "max_distance_m": 3000},
+      {"id": "lowland", "label": "Lowland", "color": "#5aa62c", "from_water_m": 8},
+      {"id": "upland", "label": "Higher ground", "color": "#2f6b1e", "from_m": 60},
+      {"id": "rock", "label": "Rock", "color": "#8b8b8b", "from_m": 400, "slope_deg": 40, "slope_from_m": 200},
+      {"id": "snow", "label": "Snow", "color": "#f4f4f4", "from_m": 900}
+    ]
+  },
+  "slicer": {"executable": "", "machine_preset": "", "process_preset": "", "filament_presets": [], "extra_args": [], "timeout_s": 3600}
+}
