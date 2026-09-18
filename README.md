@@ -5,7 +5,7 @@ for the **Elegoo Centauri Carbon 2 Combo** (4 filament slots, 256 mm bed).
 Pick an area and scale on a map, set the height exaggeration, preview the
 coloured model, and export a multi-object 3MF (one object per colour) plus
 per-colour STLs and a print plan. With OrcaSlicer's CLI configured it also
-produces G-code.
+produces G-code. This whole thing was built by Claude Fable while I slept. 
 
 ![Geneva to Mont Blanc, six 200 mm tiles assembled](docs/images/geneva_assembly.png)
 
