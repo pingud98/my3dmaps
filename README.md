@@ -10,7 +10,7 @@ produces G-code. This whole thing was built by Claude Fable while I slept.
 ![Geneva to Mont Blanc, six 200 mm tiles assembled](docs/images/geneva_assembly.png)
 
 *Lake Geneva to the Mont Blanc massif: 3 × 2 tiles at 1:250,000, 2.5× height
-exaggeration, six colours (water, shore, two vegetation tiers, rock, snow).*
+exaggeration, five colours (water, two vegetation tiers, rock, snow).*
 
 ## What it does
 
@@ -54,10 +54,12 @@ use and motorway/trunk/primary roads in dark grey):
 
 ### Geneva to Mont Blanc, 1:250,000, 3 × 2 tiles
 
-Six colours on four slots: the preset uses the manual-swap strategy, so the
-tiles that reach the snowline pause once when the shore colour has finished
-(shore → rock) and once more when lowland has finished (lowland → snow). The
-lake surface is read from SRTM's flattened water and sits at 370 m.
+Five colours on four slots: the preset uses the manual-swap strategy, so the
+three tiles that reach the snowline pause once, at about 28.5 mm, where
+lowland green has finished and snow starts. The other three tiles need no
+manual swap. There is no shore band here: at 1:250,000 it was only a 1 to 2 mm
+rim around the lake, and dropping it removed six of the nine manual swaps.
+The lake surface is read from SRTM's flattened water and sits at 370 m.
 
 | tile_x0_y1 | tile_x1_y1 | tile_x2_y1 |
 |---|---|---|
@@ -113,13 +115,11 @@ credits for every tile. The Mont Blanc tile of the Geneva preset:
 ```
 --- tile_x1_y0 (height 49.8 mm) ---
   slot 1: water+base               #1f5fbf  z    0.0 -   23.5 mm
-  slot 2: sand                     #d9c58c  z    3.0 -    6.0 mm
-  slot 3: lowland                  #5aa62c  z    4.6 -   15.2 mm
-  slot 4: upland                   #2f6b1e  z    9.3 -   22.9 mm
-  slot 2: rock                     #8b8b8b  z   13.0 -   33.1 mm
-  slot 3: snow                     #f4f4f4  z   28.6 -   49.8 mm
-  MANUAL SWAP at z=13.0 mm: slot 2 #d9c58c -> #8b8b8b (sand -> rock)
-  MANUAL SWAP at z=28.6 mm: slot 3 #5aa62c -> #f4f4f4 (lowland -> snow)
+  slot 2: lowland                  #5aa62c  z    3.0 -   15.2 mm
+  slot 3: upland                   #2f6b1e  z    9.3 -   22.9 mm
+  slot 4: rock                     #8b8b8b  z   13.0 -   33.1 mm
+  slot 2: snow                     #f4f4f4  z   28.6 -   49.8 mm
+  MANUAL SWAP at z=28.6 mm: slot 2 #5aa62c -> #f4f4f4 (lowland -> snow)
 ```
 
 ## Slicing (OrcaSlicer / Elegoo Slicer)

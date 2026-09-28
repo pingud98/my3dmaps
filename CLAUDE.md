@@ -195,8 +195,20 @@ Decisions made while implementing (these refine the sections above):
   more colours than slots, `overflow: "merge"` merges the adjacent pair with
   the lowest (ΔE·√min-area) score, keeping the larger band's colour;
   `overflow: "swap"` keeps all bands and plans manual swaps where a finished
-  colour frees a slot (Geneva preset: 6 colours, 2 swaps on the Mont Blanc
-  tile, at 13.0 mm and 28.6 mm).  Slots are only reused when all 4 are taken.
+  colour frees a slot (Geneva preset: 5 colours, one lowland → snow swap at
+  ~28.5 mm on each of the three snowline tiles).  Slots are only reused when
+  all 4 are taken.
+- **Geneva has no shore band (user decision 2026-09-28); Liverpool keeps it.**
+  At 1:250,000 the shore was a 1–2 mm rim around the lake.  Measured on the
+  6-tile set: manual swaps 9 → 3, automatic per-layer colour changes 950 → 894
+  with rivers (530 → 472 lakes only).  At Liverpool's 1:50,000 the shore band
+  shows real tidal flats and costs no swaps (4 colours).
+- **Colour-change costs (measured 2026-09-28, 0.2 mm layers, Σ(colours−1)
+  per layer):** rivers roughly double automatic colour changes versus lakes
+  only (Geneva 530 → 950, Liverpool 129 → 282) because river blue climbs the
+  valleys and appears on most layers, whereas lake blue is confined to the
+  bottom layers.  Rivers add no manual swaps where the region already has a
+  lake or sea.
 - **No keying (2026-09-18):** the user glues tiles, so the base plate is a
   plain square and the earlier tab-and-slot keying was removed.
   `shrinkage_pct` scales each tile's XY about its centre so the cooled part

@@ -1,6 +1,6 @@
 {
   "name": "geneva-montblanc",
-  "notes": "Lake Geneva basin (Geneva at the west end) to the Mont Blanc massif. 3x2 tiles at 1:250,000 = 50 km per tile, 150 x 100 km total. Full band set: water, shore, two vegetation tiers, rock, snow; 6 colors on 4 slots: palette.overflow='swap' plans manual filament swaps at the layer heights where the base/shore colors have finished (set to 'merge' to auto-merge the two least distinct bands instead).",
+  "notes": "Lake Geneva basin (Geneva at the west end) to the Mont Blanc massif. 3x2 tiles at 1:250,000 = 50 km per tile, 150 x 100 km total. Bands: water, two vegetation tiers, rock, snow. No shore band (dropped 2026-09-28: at this scale it is a 1-2 mm rim that cost six of nine manual swaps). 5 colours on 4 slots: palette.overflow='swap' plans one manual swap (lowland -> snow, ~28 mm) on the three tiles that reach the snowline; set 'merge' to auto-merge the two least distinct bands instead.",
   "center_lat": 46.15,
   "center_lon": 6.55,
   "scale": 250000,
@@ -13,8 +13,49 @@
   "pitch_mm": 0.5,
   "dem_source": "srtmgl1",
   "water": true,
-  "rivers": {"enabled": true, "source": "osm", "classes": ["river", "canal", "stream"], "stream_max_scale": 60000, "min_width_mm": 1.2, "width_scale": 1.0, "depth_mm": 0.6, "default_width_m": {"river": 30, "canal": 15, "stream": 5}},
-  "urban": {"enabled": false, "source": "osm", "color": "#4a4a4a", "label": "Urban", "landuse": ["residential", "industrial", "commercial", "retail"], "roads": ["motorway", "trunk", "primary"], "road_min_width_mm": 1.2, "road_width_scale": 1.0, "road_default_width_m": {"motorway": 30, "trunk": 20, "primary": 12}, "depth_mm": 0.6},
+  "rivers": {
+    "enabled": true,
+    "source": "osm",
+    "classes": [
+      "river",
+      "canal",
+      "stream"
+    ],
+    "stream_max_scale": 60000,
+    "min_width_mm": 1.2,
+    "width_scale": 1.0,
+    "depth_mm": 0.6,
+    "default_width_m": {
+      "river": 30,
+      "canal": 15,
+      "stream": 5
+    }
+  },
+  "urban": {
+    "enabled": false,
+    "source": "osm",
+    "color": "#4a4a4a",
+    "label": "Urban",
+    "landuse": [
+      "residential",
+      "industrial",
+      "commercial",
+      "retail"
+    ],
+    "roads": [
+      "motorway",
+      "trunk",
+      "primary"
+    ],
+    "road_min_width_mm": 1.2,
+    "road_width_scale": 1.0,
+    "road_default_width_m": {
+      "motorway": 30,
+      "trunk": 20,
+      "primary": 12
+    },
+    "depth_mm": 0.6
+  },
   "shrinkage_pct": 0.0,
   "palette": {
     "name": "alpine",
@@ -29,14 +70,6 @@
         "label": "Water",
         "color": "#1f5fbf",
         "kind": "water"
-      },
-      {
-        "id": "sand",
-        "label": "Shore",
-        "color": "#d9c58c",
-        "from_water_m": 0,
-        "requires_water": true,
-        "max_distance_m": 4000
       },
       {
         "id": "lowland",
