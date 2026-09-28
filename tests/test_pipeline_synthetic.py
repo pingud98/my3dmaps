@@ -69,14 +69,14 @@ def test_tile_objects_are_closed_and_fit_height(synth):
     assert abs(total - expected) / expected < 0.02
     lo, hi = np.min([o.mesh.bounds()[0] for o in tb.objects], axis=0), np.max([o.mesh.bounds()[1] for o in tb.objects], axis=0)
     assert lo[2] == 0.0
-    assert 20 < lo[0] < 40 and 216 < hi[0] < 236  # centred on the 256 mm bed
+    assert abs(lo[0] - 28.0) < 1e-6 and abs(hi[0] - 228.0) < 1e-6  # a 200 mm tile is centred on the 256 mm bed
 
 
 def test_shared_border_between_tiles(synth):
     cfg, grid, elev, water = synth
     cls = classify(cfg, grid, elev, water)
-    a = build_tile(cfg, grid, cls, 0, 0, 2.0, float(elev.min()), center_on_bed=False)
-    b = build_tile(cfg, grid, cls, 1, 0, 2.0, float(elev.min()), center_on_bed=False)
+    a = build_tile(cfg, grid, cls, 0, 0, 2.0, float(elev.min()), place=False)
+    b = build_tile(cfg, grid, cls, 1, 0, 2.0, float(elev.min()), place=False)
     va = np.concatenate([o.mesh.vertices for o in a.objects])
     vb = np.concatenate([o.mesh.vertices for o in b.objects])
     east = va[np.isclose(va[:, 0], cfg.tile_mm)]
@@ -106,7 +106,7 @@ def test_shrinkage_compensation_scales_footprint(synth):
     cfg, grid, elev, water = synth
     cfg.shrinkage_pct = 0.3
     cls = classify(cfg, grid, elev, water)
-    tb = build_tile(cfg, grid, cls, 0, 0, 2.0, float(elev.min()), center_on_bed=False)
+    tb = build_tile(cfg, grid, cls, 0, 0, 2.0, float(elev.min()), place=False)
     lo = np.min([o.mesh.bounds()[0] for o in tb.objects], axis=0)
     hi = np.max([o.mesh.bounds()[1] for o in tb.objects], axis=0)
     assert abs((hi[0] - lo[0]) - cfg.tile_mm * 1.003) < 1e-6
@@ -176,3 +176,34 @@ def test_base_none_uses_lowest_elevation_band_not_overlay(synth):
     cls = classify(cfg, grid, elev, None, None, UrbanFeatures([], [("residential", town, None)]))
     assert cls.bands[0].kind == "urban"
     assert cls.base_color == cls.bands[cls.elev_band_indices[0]].color != cls.bands[0].color
+
+
+def test_bed_placement_avoids_the_no_print_zone():
+    from my3dmaps.config import BED_EXCLUDE, place_on_bed
+
+    assert place_on_bed(200.0) == (28.0, 28.0)  # centred when that is clear
+    x, y = place_on_bed(245.0)
+    ex0, ey0, ex1, ey1 = BED_EXCLUDE[0]
+    assert x >= 0.5 and y >= 0.5 and x + 245 <= 255.5 and y + 245 <= 255.5
+    assert x + 245 <= ex0 - 0.5 or y >= ey1 + 0.5  # clear of the front-right corner zone
+    assert place_on_bed(250.0) is None  # the requested 25 cm does not fit
+    assert ProjectConfig(tile_mm=250.0).validate()
+    assert ProjectConfig(tile_mm=245.0).validate() == []
+
+
+def test_245mm_tile_is_placed_clear_of_the_zone(synth):
+    cfg, grid, elev, water = synth
+    cfg.tile_mm = 245.0
+    cls = classify(cfg, grid, elev, water)
+    tb = build_tile(cfg, grid, cls, 0, 0, 2.0, float(elev.min()))
+    lo = np.min([o.mesh.bounds()[0] for o in tb.objects], axis=0)
+    hi = np.max([o.mesh.bounds()[1] for o in tb.objects], axis=0)
+    assert lo[0] >= 0.5 - 1e-9 and hi[0] <= 245.5 + 1e-9  # right edge left of the zone at x = 246
+    assert lo[1] >= 0.5 - 1e-9 and hi[1] <= 255.5 + 1e-9
+    assert tuple(tb.bed_offset_mm) == (lo[0], lo[1])
+
+
+def test_suggested_relief_scales_with_tile_size():
+    small = suggest_exaggeration(ProjectConfig(scale=250000, tile_mm=200.0), 4000.0)
+    big = suggest_exaggeration(ProjectConfig(scale=250000, tile_mm=245.0), 4000.0)
+    assert big > small

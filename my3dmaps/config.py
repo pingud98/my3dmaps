@@ -12,8 +12,41 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any, Optional
 
-TILE_MM_DEFAULT = 200.0
+TILE_MM_DEFAULT = 245.0  # 2 x 2 tiles fill a 50 x 50 cm frame with a 5 mm border
 BED_MM = 256.0
+# Elegoo Centauri Carbon 2 no-print zone, from OrcaSlicer's official profile
+# (resources/profiles/Elegoo/machine/ECC2, "bed_exclude_area"): x 246-256, y 0-20.
+BED_EXCLUDE = [(246.0, 0.0, 256.0, 20.0)]
+BED_CLEARANCE_MM = 0.5  # gap kept from the bed edge and the no-print zone
+
+
+def place_on_bed(footprint_mm: float) -> tuple[float, float] | None:
+    """(x, y) of a square footprint's lower-left corner on the bed: centred when
+    that clears the no-print zones, otherwise shifted the least distance that
+    does.  None if it cannot fit at all."""
+    lo, hi = BED_CLEARANCE_MM, BED_MM - BED_CLEARANCE_MM - footprint_mm
+    if hi < lo:
+        return None
+    centre = (BED_MM - footprint_mm) / 2.0
+
+    def clear(x: float, y: float) -> bool:
+        return all(x + footprint_mm <= ex0 - BED_CLEARANCE_MM or x >= ex1 + BED_CLEARANCE_MM
+                   or y + footprint_mm <= ey0 - BED_CLEARANCE_MM or y >= ey1 + BED_CLEARANCE_MM
+                   for ex0, ey0, ex1, ey1 in BED_EXCLUDE)
+
+    cands = {lo, hi, centre}
+    for ex0, ey0, ex1, ey1 in BED_EXCLUDE:
+        cands |= {ex0 - BED_CLEARANCE_MM - footprint_mm, ex1 + BED_CLEARANCE_MM,
+                  ey0 - BED_CLEARANCE_MM - footprint_mm, ey1 + BED_CLEARANCE_MM}
+    cands = sorted(c for c in cands if lo - 1e-9 <= c <= hi + 1e-9)
+    best = None
+    for x in cands:
+        for y in cands:
+            if clear(x, y):
+                d = abs(x - centre) + abs(y - centre)
+                if best is None or d < best[0]:
+                    best = (d, x, y)
+    return None if best is None else (best[1], best[2])
 
 NAMED_COLORS = {
     "blue": "#1f5fbf",
@@ -149,6 +182,13 @@ class SlicerConfig:
     filament_presets: list[str] = field(default_factory=list)  # one .json per physical slot (up to 4)
     extra_args: list[str] = field(default_factory=list)
     timeout_s: int = 3600
+    # "auto": switch the prime tower off when the tile leaves no room for one on the bed
+    # (a 245 mm tile leaves 11 mm); "on"/"off" force it.  Applied by writing a copy of
+    # process_preset with enable_prime_tower overridden.  The CC2 purges each colour
+    # change itself (purge_in_prime_tower = 0), so no tower only loses the nozzle wipe
+    # and OrcaSlicer's flush-into-infill, which needs a tower to take effect.
+    prime_tower: str = "auto"
+    prime_tower_room_mm: float = 35.0  # free bed width "auto" needs beside the tile to keep the tower
 
 
 @dataclass
@@ -222,8 +262,9 @@ class ProjectConfig:
         problems = []
         if not (0.05 <= self.pitch_mm <= 5):
             problems.append("pitch_mm should be between 0.05 and 5")
-        if self.tile_mm * (1 + self.shrinkage_pct / 100.0) > BED_MM - 8:
-            problems.append("tile (after shrinkage compensation) leaves no margin on the 256 mm bed")
+        if place_on_bed(self.tile_mm * (1 + self.shrinkage_pct / 100.0)) is None:
+            problems.append(f"a {self.tile_mm * (1 + self.shrinkage_pct / 100.0):.1f} mm tile does not fit the bed "
+                            "outside the printer's no-print zone (largest square is about 245 mm)")
         if not (-2.0 <= self.shrinkage_pct <= 5.0):
             problems.append("shrinkage_pct should be a small percentage (e.g. 0.3)")
         if self.rivers.enabled and self.rivers.depth_mm > self.palette.skin_depth_mm:

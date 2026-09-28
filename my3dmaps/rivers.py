@@ -89,7 +89,7 @@ def fetch_overpass(q: str, label: str, progress: Callable[[str], None] | None = 
     for attempt, url in enumerate(urls * 2):
         try:
             r = requests.post(url, data={"data": q}, timeout=timeout, headers={"User-Agent": USER_AGENT})
-            if r.status_code in (429, 504, 503):
+            if r.status_code in (429, 502, 503, 504):
                 last = RuntimeError(f"Overpass {url} answered HTTP {r.status_code}")
                 time.sleep(5 * (attempt + 1))
                 continue

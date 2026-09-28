@@ -138,3 +138,14 @@ def test_liverpool_rivers_from_osm():
     assert "River Alt" in names
     cells = rasterize_rivers(r, grid, cfg)
     assert cells.any()
+
+
+def test_build_fails_loudly_when_rivers_cannot_be_fetched(monkeypatch, tmp_path, synth):
+    import my3dmaps.pipeline as P
+    from my3dmaps.pipeline import Terrain
+
+    cfg, grid, elev, water = synth
+    broken = RiverFeatures([], [], "osm", "HTTP 502")
+    monkeypatch.setattr(P, "prepare_terrain", lambda *a, **k: Terrain(grid, elev, elev, water, {}, broken))
+    with pytest.raises(RuntimeError, match="--no-rivers"):
+        P.build_project(cfg, tmp_path)

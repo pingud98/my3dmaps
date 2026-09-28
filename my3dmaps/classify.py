@@ -378,13 +378,14 @@ def classify(cfg: ProjectConfig, grid: Grid, elev: np.ndarray, water: Optional[W
 def suggest_exaggeration(cfg: ProjectConfig, relief_m: float, target_relief_mm: float = 45.0) -> float:
     """Pick a starting height multiplier from measured relief.
 
-    Aims for ~45 mm of relief on a 200 mm tile (flat regions get more,
-    mountains less), clamped to 1-8x and to the printable height budget.
+    Aims for ~45 mm of relief per 200 mm of tile edge (55 mm on a 245 mm
+    tile; flat regions get more, mountains less), clamped to 1-8x and to the
+    printable height budget.
     """
     if relief_m <= 0:
         return 1.0
-    natural = relief_m * cfg.mm_per_m * (cfg.tile_mm / 200.0)
-    ex = target_relief_mm / max(natural, 1e-6)
+    natural = relief_m * cfg.mm_per_m
+    ex = target_relief_mm * (cfg.tile_mm / 200.0) / max(natural, 1e-6)
     ex = max(1.0, min(8.0, ex))
     return cap_exaggeration(cfg, relief_m, round(ex * 4) / 4)
 

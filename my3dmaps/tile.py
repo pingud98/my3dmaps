@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .classify import Classification
-from .config import BED_MM, ProjectConfig
+from .config import ProjectConfig, place_on_bed
 from .geo import Grid
 from .mesh import Mesh, MeshObject, concat, sheet_mesh
 from .plan import ColorRange, SlotPlan, plan_slots
@@ -38,6 +38,7 @@ class TileBuild:
     exaggeration: float
     ranges: list[ColorRange] = field(default_factory=list)
     footprint_mm: float = 0.0  # printed footprint after shrinkage compensation
+    bed_offset_mm: tuple[float, float] = (0.0, 0.0)  # where the tile's (0,0) corner sits on the bed
 
     @property
     def name(self) -> str:
@@ -51,6 +52,7 @@ class TileBuild:
                          "triangles": int(len(o.mesh.faces))} for o in self.objects],
             "plan": self.plan.to_dict(),
             "footprint_mm": round(self.footprint_mm, 3),
+            "bed_offset_mm": [round(v, 3) for v in self.bed_offset_mm],
         }
 
 
@@ -86,7 +88,7 @@ def skin_depth_nodes(skin_depth_mm: float, thin: list[tuple[np.ndarray | None, f
 
 
 def build_tile(cfg: ProjectConfig, grid: Grid, cls: Classification, tx: int, ty: int,
-               exaggeration: float, z_datum_m: float, center_on_bed: bool = True) -> TileBuild:
+               exaggeration: float, z_datum_m: float, place: bool = True) -> TileBuild:
     js, is_ = grid.tile_slices(tx, ty)
     e = cls.elev[js, is_]
     cells_cls = cls.cells[js.start:js.stop - 1, is_.start:is_.stop - 1]
@@ -160,9 +162,16 @@ def build_tile(cfg: ProjectConfig, grid: Grid, cls: Classification, tx: int, ty:
             v[:, 1] = c + (v[:, 1] - c) * f
             o.mesh = Mesh(v, o.mesh.faces)
 
-    if center_on_bed:
-        off = (BED_MM - cfg.tile_mm) / 2.0
+    # bed placement: centred, or nudged clear of the printer's no-print zone
+    offset = (0.0, 0.0)
+    if place:
+        foot = cfg.tile_mm * f
+        pos = place_on_bed(foot)
+        if pos is None:
+            raise ValueError(f"a {foot:.1f} mm tile does not fit the bed outside the no-print zone")
+        # the shrinkage scaling kept the tile centred on tile_mm/2, so its corner is at -(foot - tile_mm)/2
+        offset = (pos[0] + (foot - cfg.tile_mm) / 2.0, pos[1] + (foot - cfg.tile_mm) / 2.0)
         for o in objects:
-            o.mesh = o.mesh.translated((off, off, 0.0))
+            o.mesh = o.mesh.translated((offset[0], offset[1], 0.0))
 
-    return TileBuild(tx, ty, objects, plan, float(ez.max()), z_datum_m, exaggeration, ranges, cfg.tile_mm * f)
+    return TileBuild(tx, ty, objects, plan, float(ez.max()), z_datum_m, exaggeration, ranges, cfg.tile_mm * f, offset)

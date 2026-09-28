@@ -37,3 +37,20 @@ def test_slice_tile_dry_run_builds_expected_command(tmp_path):
     assert "--load-filaments f1.json;f2.json" in cmd
     assert "--load-assemble-list" in cmd and "--slice 0" in cmd and "--export-3mf tile.3mf" in cmd
     assert Path(res.log_path).exists()
+
+
+def test_prime_tower_auto_off_for_big_tiles(tmp_path):
+    import json
+
+    from my3dmaps.slicer import process_with_prime_tower, wants_prime_tower
+
+    cfg = SlicerConfig()
+    assert wants_prime_tower(cfg, 200.0) and not wants_prime_tower(cfg, 245.0)
+    assert wants_prime_tower(SlicerConfig(prime_tower="on"), 245.0)
+    proc = tmp_path / "p.json"
+    proc.write_text(json.dumps({"type": "process", "name": "0.20mm Standard", "enable_prime_tower": "1"}))
+    out = process_with_prime_tower(str(proc), False, tmp_path)
+    d = json.loads(open(out).read())
+    assert d["enable_prime_tower"] == "0" and "prime tower off" in d["name"]
+    assert json.loads(proc.read_text())["enable_prime_tower"] == "1"  # original untouched
+    assert process_with_prime_tower(str(proc), True, tmp_path) == str(proc)  # nothing to change

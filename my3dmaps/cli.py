@@ -105,7 +105,8 @@ def cmd_slicer_run(args):
     proj = ProjectConfig.load(args.project) if args.project else ProjectConfig.load(tdir.parent / "project.json")
     inputs = [SliceInput(tdir / f"{o['name']}.stl", o["extruder"]) for o in plan["objects"]]
     swaps = [Swap(**s) for s in plan["plan"]["swaps"]]
-    res = slice_tile(proj.slicer, inputs, tdir / "sliced", plan["name"], swaps, dry_run=args.dry_run)
+    res = slice_tile(proj.slicer, inputs, tdir / "sliced", plan["name"], swaps, dry_run=args.dry_run,
+                     footprint_mm=plan.get("footprint_mm", proj.tile_mm))
     print(json.dumps({"ok": res.ok, "message": res.message, "gcode": str(res.gcode_path) if res.gcode_path else None,
                       "command": res.command, "log": str(res.log_path)}, indent=2))
 

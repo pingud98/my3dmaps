@@ -19,7 +19,7 @@ Coding is being done by Fable against this spec. Keep this file the single sourc
 
 ## Tiling
 
-Models are built in **200 × 200 mm modules** (footprint), leaving margin inside the 256 × 256 bed for adhesion/skirt. Reasons:
+Models are built in **245 × 245 mm modules** (footprint; decision 2026-09-28, originally 200 mm) so that 2 × 2 tiles fill a 50 × 50 cm IKEA frame with a 5 mm border. The user asked for 250 mm, but the CC2's OrcaSlicer profile excludes x 246–256, y 0–20 on the 256 × 256 bed, so 245 mm (placed at x 0.5) is the largest printable square; 3 × 3 of 167 mm and 2 × 3 of 250 × 167 mm were offered and declined. Reasons for tiling:
 - Fits the bed with margin.
 - Lets a long/thin region (e.g. a lake shoreline, a valley) be printed as a strip of tiles rather than one oversized model.
 - Lets a larger area (e.g. full Geneva-to-Mont-Blanc transect) be assembled from a 2×2 or 3×3 (etc.) grid of tiles.
@@ -64,7 +64,7 @@ Band boundaries (snowline elevation, treeline, sand-band width, etc.) are per-pr
 ## UI
 
 Local web app (not a native app) so map interaction and 3D preview can reuse mature JS libraries:
-- **Area & scale selection:** Leaflet map with a draggable/resizable bounding box. Box dimensions are locked to the physical tile size × chosen scale (e.g. 200 mm tile at 1:25,000 = 5 km per tile edge), so dragging/resizing the box directly manipulates scale, and the UI shows resulting real-world coverage and tile count live.
+- **Area & scale selection:** Leaflet map with a draggable/resizable bounding box. Box dimensions are locked to the physical tile size × chosen scale (e.g. 245 mm tile at 1:25,000 = 6.1 km per tile edge), so dragging/resizing the box directly manipulates scale, and the UI shows resulting real-world coverage and tile count live.
 - **Height exaggeration:** a slider (multiplier, e.g. 1×–8×) applied after scale conversion, live-updating the 3D preview. No fixed default — flat regions typically want more exaggeration to read as interesting terrain, mountainous regions want less; consider suggesting a starting value based on the region's actual relief (max−min elevation over footprint) rather than a flat constant.
 - **3D preview:** Three.js viewer showing the actual colored mesh (post band-classification) so the user can inspect before committing to slicing.
 - **Palette controls:** pick support-layer color (blue/black/none), tweak band boundaries, see which bands are present/pruned for the current selection.
@@ -188,16 +188,20 @@ Decisions made while implementing (these refine the sections above):
   whole projects Liverpool 480 → 244 MB, Geneva 1015 → 488 MB.  What remains
   is genuine terrain surface (no lossy simplification, by decision).
 - **Model Z:** `z = base_mm + skin + (elev − min_elev) · (1000/scale) · exaggeration`;
-  auto exaggeration targets ~45 mm of relief per 200 mm tile, clamped to 1–8×
-  and to `max_height_mm` (180).  Geneva 1:250k → 2.5×, Liverpool 1:50k → 8×.
+  auto exaggeration targets ~45 mm of relief per 200 mm of tile edge (55 mm on
+  245 mm; before 2026-09-28 bigger tiles wrongly got *less* relief), clamped to
+  1–8× and to `max_height_mm` (180).  Geneva 1:200k would auto-pick 2.5×
+  (60 mm tall) but the preset fixes **2.0× (≈49 mm)** so it fits the user's
+  6 cm deep frame under glass (decision 2026-09-28; the user may deepen the
+  frame back if needed).  Liverpool 1:50k → 8× (22 mm).
 - **Pruning/merging:** bands with no area above their threshold, or covering
   <0.3 % of the footprint, are dropped (Liverpool loses rock & snow).  With
   more colours than slots, `overflow: "merge"` merges the adjacent pair with
   the lowest (ΔE·√min-area) score, keeping the larger band's colour;
   `overflow: "swap"` keeps all bands and plans manual swaps where a finished
-  colour frees a slot (Geneva preset: 5 colours, one lowland → snow swap at
-  ~28.5 mm on each of the three snowline tiles).  Slots are only reused when
-  all 4 are taken.
+  colour frees a slot (Geneva preset, 2 × 2 at 1:200k: 5 colours, one
+  lowland → snow swap at ~27–28 mm on each of the two eastern tiles at 2.0×).  Slots are
+  only reused when all 4 are taken.
 - **Geneva has no shore band (user decision 2026-09-28); Liverpool keeps it.**
   At 1:250,000 the shore was a 1–2 mm rim around the lake.  Measured on the
   6-tile set: manual swaps 9 → 3, automatic per-layer colour changes 950 → 894
@@ -214,8 +218,25 @@ Decisions made while implementing (these refine the sections above):
   `shrinkage_pct` scales each tile's XY about its centre so the cooled part
   measures `tile_mm` (0.3 % is typical for PLA; leave 0 if the slicer's
   filament profile already compensates — never both).  Z is not scaled.
-- **Tile placement:** each tile's STL/3MF is centred on the 256 mm bed
-  (offset 28 mm), so files drop straight into the slicer.
+- **Tile placement (2026-09-28):** `config.place_on_bed` centres the tile on
+  the 256 mm bed when that clears the no-print zone (`BED_EXCLUDE`, from the
+  CC2 profile) and otherwise shifts it the least distance that does, keeping
+  0.5 mm from every edge; a 245 mm tile lands at (0.5, 5.5).  The offset is
+  recorded per tile (`bed_offset_mm` in plan.json) and `validate()` rejects
+  tiles that cannot be placed.  Files drop straight into the slicer.
+- **Prime tower (2026-09-28):** no room beside a 245 mm tile, so
+  `slicer.prime_tower: "auto"` slices with a copy of the process preset with
+  `enable_prime_tower = "0"` when less than 35 mm of bed is free.  From the
+  CC2 profile: `purge_in_prime_tower = 0` and `change_filament_gcode` runs
+  `M6211 … L[flush_length]`, i.e. the printer purges each change itself.
+  OrcaSlicer's flush-into-infill / flush-into-object options only apply when
+  a prime tower is enabled (PrintConfig tooltips; Print.cpp only calls
+  `mark_wiping_extrusions` for wipe-tower layers), so without a tower all of
+  the purge is the printer's.
+- **Missing OSM layers fail the build (2026-09-28):** an Overpass error used
+  to drop rivers silently (it happened on the first 245 mm Geneva build).
+  `build_project` now raises when an enabled rivers/urban layer could not be
+  fetched; the preview still degrades gracefully.  HTTP 502 is retried.
 - **Slicer CLI (spike result, from the OrcaSlicer sources, not a live binary):**
   `--load-filament-ids` cannot be combined with a 3MF input, so the driver uses
   `--load-assemble-list` with per-band STLs (one filament per part, merged into
@@ -223,7 +244,7 @@ Decisions made while implementing (these refine the sections above):
   `--slice 0`, `--export-3mf`, `--outputdir`; G-code appears as
   `plate_1.gcode`.  Manual-swap pauses are inserted into the G-code before the
   first layer at/above the planned height (`machine_pause_gcode` from the
-  exported machine preset, else `M601`).  The 3MF also carries per-object
+  exported machine preset, else `M600`, the CC2 profile's pause command).  The 3MF also carries per-object
   `extruder` metadata and `custom_gcode_per_layer.xml` pauses for GUI use.
   **Still to verify on the real Elegoo fork:** run `my3dmaps slicer probe`, export
   machine/process/filament presets from the GUI, then `build --slice`.

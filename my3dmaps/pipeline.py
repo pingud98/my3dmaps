@@ -209,6 +209,11 @@ def build_project(cfg: ProjectConfig, out_dir: str | Path, progress: Progress = 
     if problems:
         raise ValueError("; ".join(problems))
     terrain = prepare_terrain(cfg, progress)
+    # a build must not silently differ from what was asked for (the preview tolerates missing layers)
+    for layer, feats, flag in (("rivers", terrain.rivers, "--no-rivers"), ("urban layer", terrain.urban, "--no-urban")):
+        if feats is not None and feats.error:
+            raise RuntimeError(f"{layer} are enabled but could not be fetched ({feats.error}). "
+                               f"Try again later (the Overpass API is a shared service), or build without them ({flag}).")
     progress("classify", "classifying terrain into bands", 0.35)
     cls = analyze(cfg, terrain)
     tiles = build_tiles(cfg, terrain, cls, progress)
@@ -236,7 +241,7 @@ def build_project(cfg: ProjectConfig, out_dir: str | Path, progress: Progress = 
         summ["files"] = {"3mf": str(tdir / f"{t.name}.3mf"), "stl": [str(s.stl_path) for s in stls]}
         if do_slice:
             progress("slice", f"slicing {t.name}", None)
-            res = slice_tile(cfg.slicer, stls, tdir / "sliced", t.name, t.plan.swaps)
+            res = slice_tile(cfg.slicer, stls, tdir / "sliced", t.name, t.plan.swaps, footprint_mm=t.footprint_mm)
             summ["slice"] = {"ok": res.ok, "message": res.message, "gcode": str(res.gcode_path) if res.gcode_path else None,
                              "log": str(res.log_path), "swaps_inserted": res.swaps_inserted, "command": res.command}
         tile_summaries.append(summ)

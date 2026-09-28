@@ -26,7 +26,7 @@ def pytest_collection_modifyitems(config, items):
 @pytest.fixture
 def synth():
     """Synthetic 2x1 project: a lake on the west, a 3000 m peak on the east."""
-    cfg = ProjectConfig(name="synth", scale=50000, tiles_x=2, tiles_y=1, pitch_mm=2.0, exaggeration=2.0)
+    cfg = ProjectConfig(name="synth", scale=50000, tiles_x=2, tiles_y=1, tile_mm=200.0, pitch_mm=2.0, exaggeration=2.0)
     grid = make_grid(cfg)
     ny, nx = grid.shape
     X, Y = np.meshgrid(np.linspace(0, 1, nx), np.linspace(0, 1, ny))

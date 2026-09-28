@@ -7,10 +7,10 @@ coloured model, and export a multi-object 3MF (one object per colour) plus
 per-colour STLs and a print plan. With OrcaSlicer's CLI configured it also
 produces G-code. This whole thing was built by Claude Fable while I slept. 
 
-![Geneva to Mont Blanc, six 200 mm tiles assembled](docs/images/geneva_assembly.png)
+![Geneva to Mont Blanc, four 245 mm tiles assembled](docs/images/geneva_assembly.png)
 
-*Lake Geneva to the Mont Blanc massif: 3 × 2 tiles at 1:250,000, 2.5× height
-exaggeration, five colours (water, two vegetation tiers, rock, snow).*
+*Lake Geneva to the Mont Blanc massif: 2 × 2 tiles of 245 mm at 1:200,000, sized for a 50 × 50 cm frame, 2× height
+exaggeration (about 49 mm tall, so it fits a 6 cm deep frame under glass), five colours (water, two vegetation tiers, rock, snow).*
 
 ## What it does
 
@@ -18,9 +18,13 @@ exaggeration, five colours (water, two vegetation tiers, rock, snow).*
   coastline, both public domain. Rivers, and optionally built-up areas and
   major roads, come from OpenStreetMap (ODbL, credit required, can be
   switched off). See [SOURCES.md](SOURCES.md).
-* **Tiles:** 200 × 200 mm modules on a shared grid, so any N × M set butts
-  together seamlessly. Tiles are meant to be glued edge to edge; an optional
-  shrinkage compensation keeps the cooled parts at nominal size.
+* **Tiles:** 245 × 245 mm modules on a shared grid, so any N × M set butts
+  together seamlessly; 2 × 2 fills a 50 × 50 cm frame with a 5 mm border.
+  245 mm is the largest square the Centauri Carbon 2 can print: its slicer
+  profile has a 10 × 20 mm no-print zone in the front-right corner, and each
+  tile is placed on the bed clear of it. Tiles are meant to be glued edge to
+  edge; an optional shrinkage compensation keeps the cooled parts at nominal
+  size.
 * **Colours:** a config-driven, elevation-ordered palette. Bands that do not
   occur in a region are dropped automatically (Liverpool has no rock or snow).
   With more colours than slots the two least distinct bands are merged, or a
@@ -52,20 +56,20 @@ use and motorway/trunk/primary roads in dark grey):
 
 ![Liverpool with the urban layer](docs/images/liverpool_urban_assembly.png)
 
-### Geneva to Mont Blanc, 1:250,000, 3 × 2 tiles
+### Geneva to Mont Blanc, 1:200,000, 2 × 2 tiles of 245 mm
 
 Five colours on four slots: the preset uses the manual-swap strategy, so the
-three tiles that reach the snowline pause once, at about 28.5 mm, where
-lowland green has finished and snow starts. The other three tiles need no
-manual swap. There is no shore band here: at 1:250,000 it was only a 1 to 2 mm
-rim around the lake, and dropping it removed six of the nine manual swaps.
+two eastern tiles that reach the snowline pause once, at about 27 to 28 mm, where
+lowland green has finished and snow starts. The two western tiles need no
+manual swap. There is no shore band here: at this scale it is only a 1 to 2 mm
+rim around the lake, and dropping it removed most of the manual swaps.
 The lake surface is read from SRTM's flattened water and sits at 370 m.
 
-| tile_x0_y1 | tile_x1_y1 | tile_x2_y1 |
-|---|---|---|
-| ![](docs/images/geneva_tile_x0_y1.png) | ![](docs/images/geneva_tile_x1_y1.png) | ![](docs/images/geneva_tile_x2_y1.png) |
-| **tile_x0_y0** | **tile_x1_y0 (Mont Blanc)** | **tile_x2_y0** |
-| ![](docs/images/geneva_tile_x0_y0.png) | ![](docs/images/geneva_tile_x1_y0.png) | ![](docs/images/geneva_tile_x2_y0.png) |
+| tile_x0_y1 (north-west, Lake Geneva) | tile_x1_y1 (north-east) |
+|---|---|
+| ![](docs/images/geneva_tile_x0_y1.png) | ![](docs/images/geneva_tile_x1_y1.png) |
+| **tile_x0_y0 (south-west)** | **tile_x1_y0 (south-east, Mont Blanc)** |
+| ![](docs/images/geneva_tile_x0_y0.png) | ![](docs/images/geneva_tile_x1_y0.png) |
 
 ### Web UI
 
@@ -97,7 +101,7 @@ my3dmaps slicer probe                   # check which CLI flags the installed sl
 my3dmaps slicer run out/geneva/tile_x0_y0 --dry-run              # print the slicer command for one tile
 ```
 
-Overrides: `--scale 100000 --tiles 3x2 --exaggeration 2 --pitch 0.4 --shrinkage 0.3 --no-rivers --urban`.
+Overrides: `--scale 100000 --tiles 2x2 --exaggeration 2 --pitch 0.4 --shrinkage 0.3 --no-rivers --urban`.
 Set `"monochrome": true` in a project (or tick *single-colour draft* in the UI) for a one-filament draft print.
 
 ### Output per tile (`out/<name>/tile_x<i>_y<j>/`)
@@ -113,13 +117,13 @@ Set `"monochrome": true` in a project (or tick *single-colour draft* in the UI) 
 credits for every tile. The Mont Blanc tile of the Geneva preset:
 
 ```
---- tile_x1_y0 (height 49.8 mm) ---
-  slot 1: water+base               #1f5fbf  z    0.0 -   23.5 mm
-  slot 2: lowland                  #5aa62c  z    3.0 -   15.2 mm
-  slot 3: upland                   #2f6b1e  z    9.3 -   22.9 mm
-  slot 4: rock                     #8b8b8b  z   13.0 -   33.1 mm
-  slot 2: snow                     #f4f4f4  z   28.6 -   49.8 mm
-  MANUAL SWAP at z=28.6 mm: slot 2 #5aa62c -> #f4f4f4 (lowland -> snow)
+--- tile_x1_y0 (height 48.9 mm) ---
+  slot 1: water+base               #1f5fbf  z    0.0 -   22.6 mm
+  slot 2: lowland                  #5aa62c  z    3.0 -   14.1 mm
+  slot 3: upland                   #2f6b1e  z    8.5 -   21.7 mm
+  slot 4: rock                     #8b8b8b  z   12.3 -   31.5 mm
+  slot 2: snow                     #f4f4f4  z   27.3 -   48.9 mm
+  MANUAL SWAP at z=27.3 mm: slot 2 #5aa62c -> #f4f4f4 (lowland -> snow)
 ```
 
 ## Slicing (OrcaSlicer / Elegoo Slicer)
@@ -141,7 +145,19 @@ The driver uses `--load-assemble-list` (per-band STLs merged into one
 multi-part object, one filament per part), `--load-settings`,
 `--load-filaments`, `--slice 0`, `--export-3mf`, `--outputdir`. Manual-swap
 pauses are inserted into the G-code at the planned heights using the machine
-preset's pause command (fallback `M601`). **This was written from the
+preset's pause command (fallback `M600`, the CC2 profile's pause command).
+
+**Prime tower.** A 245 mm tile leaves no room on the bed for a prime tower,
+so the driver slices with a copy of your process preset that has
+`enable_prime_tower` switched off (`slicer.prime_tower`: `auto`, `on` or
+`off`; `auto` keeps the tower only when at least 35 mm of bed is free). On
+the CC2 this costs little: its profile sets `purge_in_prime_tower = 0`, and
+its filament-change command purges each colour change itself, off the model.
+What is lost is the nozzle wipe on the tower and OrcaSlicer's "flush into
+objects' infill", which hides part of each purge inside the model's infill
+but only works while a prime tower is enabled.
+
+**This was written from the
 OrcaSlicer sources, not verified against a live install**: run
 `my3dmaps slicer probe` first. Without a slicer, `build --slice` still writes
 the command it would have run to `sliced/slicer.log`.
@@ -182,7 +198,7 @@ A project is one JSON file (see `presets/`). The important fields:
 
 | Field | Meaning |
 |---|---|
-| `center_lat`, `center_lon`, `scale`, `tiles_x`, `tiles_y` | Where, how big (1:`scale`), how many 200 mm tiles |
+| `center_lat`, `center_lon`, `scale`, `tiles_x`, `tiles_y` | Where, how big (1:`scale`), how many tiles |
 | `exaggeration` | Height multiplier; `null` picks one that gives ~45 mm of relief per tile |
 | `base_mm`, `max_height_mm`, `pitch_mm` | Base plate thickness, height budget, mesh pitch on the print |
 | `palette.bands[]` | Ordered bands with `color`, `from_m` or `from_water_m`, optional `slope_deg`, `max_distance_m`, `requires_water` |

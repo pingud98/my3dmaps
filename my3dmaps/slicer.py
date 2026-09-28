@@ -112,7 +112,7 @@ def write_assemble_list(path: Path, inputs: list[SliceInput], plate_name: str) -
     return path
 
 
-def machine_pause_gcode(cfg: SlicerConfig, default: str = "M601") -> str:
+def machine_pause_gcode(cfg: SlicerConfig, default: str = "M600") -> str:  # CC2 profile's machine_pause_gcode
     if cfg.machine_preset and Path(cfg.machine_preset).exists():
         try:
             d = json.loads(Path(cfg.machine_preset).read_text())
@@ -162,19 +162,46 @@ def insert_pauses(gcode_in: Path, gcode_out: Path, swaps: list[Swap], pause_gcod
     return inserted
 
 
+def wants_prime_tower(cfg: SlicerConfig, footprint_mm: float, bed_mm: float = 256.0) -> bool:
+    if cfg.prime_tower == "on":
+        return True
+    if cfg.prime_tower == "off":
+        return False
+    return bed_mm - footprint_mm >= cfg.prime_tower_room_mm
+
+
+def process_with_prime_tower(process_preset: str, enable: bool, out_dir: Path) -> str:
+    """Copy of the exported process preset with enable_prime_tower forced (OrcaSlicer
+    preset JSON stores booleans as "0"/"1").  Returns the path to use."""
+    src = Path(process_preset)
+    d = json.loads(src.read_text())
+    want = "1" if enable else "0"
+    if str(d.get("enable_prime_tower", "")) == want:
+        return process_preset
+    d["enable_prime_tower"] = want
+    if "name" in d:
+        d["name"] = f"{d['name']} (my3dmaps, prime tower {'on' if enable else 'off'})"
+    dst = out_dir / f"process_{'tower' if enable else 'notower'}.json"
+    dst.write_text(json.dumps(d, indent=4))
+    return str(dst)
+
+
 def slice_tile(cfg: SlicerConfig, inputs: list[SliceInput], out_dir: Path, plate_name: str,
-               swaps: list[Swap] | None = None, dry_run: bool = False) -> SliceResult:
+               swaps: list[Swap] | None = None, dry_run: bool = False, footprint_mm: float | None = None) -> SliceResult:
     out_dir.mkdir(parents=True, exist_ok=True)
     log_path = out_dir / "slicer.log"
     exe = find_executable(cfg)
+    process = cfg.process_preset
+    if process and footprint_mm is not None and Path(process).exists():
+        process = process_with_prime_tower(process, wants_prime_tower(cfg, footprint_mm), out_dir)
     assemble = write_assemble_list(out_dir / "assemble.json", inputs, plate_name)
     n_slots = max([i.filament for i in inputs] + [1])
     filaments = list(cfg.filament_presets)
     if filaments and len(filaments) < n_slots:
         filaments = filaments + [filaments[-1]] * (n_slots - len(filaments))
     cmd = [exe or "orca-slicer"]
-    if cfg.machine_preset or cfg.process_preset:
-        cmd += ["--load-settings", ";".join(p for p in (cfg.machine_preset, cfg.process_preset) if p)]
+    if cfg.machine_preset or process:
+        cmd += ["--load-settings", ";".join(p for p in (cfg.machine_preset, process) if p)]
     if filaments:
         cmd += ["--load-filaments", ";".join(filaments)]
     cmd += ["--load-assemble-list", str(assemble), "--slice", "0", "--debug", "2",
