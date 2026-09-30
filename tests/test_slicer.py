@@ -45,7 +45,9 @@ def test_prime_tower_auto_off_for_big_tiles(tmp_path):
     from my3dmaps.slicer import process_with_prime_tower, wants_prime_tower
 
     cfg = SlicerConfig()
-    assert wants_prime_tower(cfg, 200.0) and not wants_prime_tower(cfg, 245.0)
+    assert wants_prime_tower(cfg, 180.0) and not wants_prime_tower(cfg, 245.0)
+    # 200 mm leaves 56 mm in total but the centred tile splits it into two 28 mm strips
+    assert not wants_prime_tower(cfg, 200.0) and not wants_prime_tower(cfg, 220.0)
     assert wants_prime_tower(SlicerConfig(prime_tower="on"), 245.0)
     proc = tmp_path / "p.json"
     proc.write_text(json.dumps({"type": "process", "name": "0.20mm Standard", "enable_prime_tower": "1"}))
@@ -54,3 +56,18 @@ def test_prime_tower_auto_off_for_big_tiles(tmp_path):
     assert d["enable_prime_tower"] == "0" and "prime tower off" in d["name"]
     assert json.loads(proc.read_text())["enable_prime_tower"] == "1"  # original untouched
     assert process_with_prime_tower(str(proc), True, tmp_path) == str(proc)  # nothing to change
+
+
+def test_slice_tile_uses_absolute_paths(tmp_path, monkeypatch):
+    import json
+
+    monkeypatch.chdir(tmp_path)
+    proc = tmp_path / "p.json"
+    proc.write_text(json.dumps({"type": "process", "enable_prime_tower": "1"}))
+    res = slice_tile(SlicerConfig(process_preset=str(proc)), [SliceInput(Path("a.stl"), 1)], Path("rel/sliced"),
+                     "tile", dry_run=True, footprint_mm=245.0)
+    cmd = res.command
+    settings = cmd[cmd.index("--load-settings") + 1]
+    assert Path(settings).is_absolute() and Path(settings).exists()
+    assert Path(cmd[cmd.index("--load-assemble-list") + 1]).is_absolute()
+    assert Path(cmd[cmd.index("--outputdir") + 1]).is_absolute()

@@ -32,7 +32,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .config import SlicerConfig
+from .config import BED_CLEARANCE_MM, BED_MM, SlicerConfig, place_on_bed
 from .plan import Swap
 
 CANDIDATE_NAMES = ["orca-slicer", "OrcaSlicer", "orcaslicer", "elegoo-slicer", "ElegooSlicer", "bambu-studio"]
@@ -162,12 +162,19 @@ def insert_pauses(gcode_in: Path, gcode_out: Path, swaps: list[Swap], pause_gcod
     return inserted
 
 
-def wants_prime_tower(cfg: SlicerConfig, footprint_mm: float, bed_mm: float = 256.0) -> bool:
+def wants_prime_tower(cfg: SlicerConfig, footprint_mm: float) -> bool:
+    """"auto": keep the tower only if the strip beside the *placed* tile (the tile
+    is centred, so the free bed is split between both sides) is wide enough."""
     if cfg.prime_tower == "on":
         return True
     if cfg.prime_tower == "off":
         return False
-    return bed_mm - footprint_mm >= cfg.prime_tower_room_mm
+    pos = place_on_bed(footprint_mm)
+    if pos is None:
+        return False
+    x, y = pos
+    widest = max(x, y, BED_MM - x - footprint_mm, BED_MM - y - footprint_mm) - BED_CLEARANCE_MM
+    return widest >= cfg.prime_tower_room_mm
 
 
 def process_with_prime_tower(process_preset: str, enable: bool, out_dir: Path) -> str:
@@ -188,6 +195,8 @@ def process_with_prime_tower(process_preset: str, enable: bool, out_dir: Path) -
 
 def slice_tile(cfg: SlicerConfig, inputs: list[SliceInput], out_dir: Path, plate_name: str,
                swaps: list[Swap] | None = None, dry_run: bool = False, footprint_mm: float | None = None) -> SliceResult:
+    # absolute: the slicer runs with cwd=out_dir, so relative paths on its command line would double up
+    out_dir = Path(out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     log_path = out_dir / "slicer.log"
     exe = find_executable(cfg)

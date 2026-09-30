@@ -189,6 +189,9 @@ def test_bed_placement_avoids_the_no_print_zone():
     assert place_on_bed(250.0) is None  # the requested 25 cm does not fit
     assert ProjectConfig(tile_mm=250.0).validate()
     assert ProjectConfig(tile_mm=245.0).validate() == []
+    problems = ProjectConfig(tile_mm=245.0, shrinkage_pct=0.3).validate()
+    assert problems and "tile_mm <= 244.2" in problems[0]  # tells the user how to make room for compensation
+    assert ProjectConfig(tile_mm=244.2, shrinkage_pct=0.3).validate() == []
 
 
 def test_245mm_tile_is_placed_clear_of_the_zone(synth):

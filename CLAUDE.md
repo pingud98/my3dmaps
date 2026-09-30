@@ -218,6 +218,11 @@ Decisions made while implementing (these refine the sections above):
   `shrinkage_pct` scales each tile's XY about its centre so the cooled part
   measures `tile_mm` (0.3 % is typical for PLA; leave 0 if the slicer's
   filament profile already compensates — never both).  Z is not scaled.
+  A 245 mm tile already fills the printable bed, so compensation must come
+  out of the nominal size (e.g. `tile_mm` 244.2 with 0.3 %); `validate()`
+  says so with the exact limits (2026-09-28).  **Decision 2026-09-30: stay
+  at 245 mm with `shrinkage_pct` 0 and let the slicer's filament profile
+  compensate shrinkage** (OrcaSlicer filament setting "Shrinkage (XY)").
 - **Tile placement (2026-09-28):** `config.place_on_bed` centres the tile on
   the 256 mm bed when that clears the no-print zone (`BED_EXCLUDE`, from the
   CC2 profile) and otherwise shifts it the least distance that does, keeping
@@ -226,7 +231,8 @@ Decisions made while implementing (these refine the sections above):
   tiles that cannot be placed.  Files drop straight into the slicer.
 - **Prime tower (2026-09-28):** no room beside a 245 mm tile, so
   `slicer.prime_tower: "auto"` slices with a copy of the process preset with
-  `enable_prime_tower = "0"` when less than 35 mm of bed is free.  From the
+  `enable_prime_tower = "0"` unless one strip beside the *placed* tile is at
+  least 35 mm wide (a centred 200 mm tile has only 28 mm per side).  From the
   CC2 profile: `purge_in_prime_tower = 0` and `change_filament_gcode` runs
   `M6211 … L[flush_length]`, i.e. the printer purges each change itself.
   OrcaSlicer's flush-into-infill / flush-into-object options only apply when

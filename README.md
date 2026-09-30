@@ -182,9 +182,12 @@ the command it would have run to `sliced/slicer.log`.
    distinct adjacent bands merge, or with `overflow: "swap"` a manual filament
    swap is planned where a finished colour's slot frees up. If the urban
    overlay has to go, its cells revert to the terrain underneath.
-7. A plain square base plate. Set `shrinkage_pct` (e.g. 0.3 for PLA) to scale
-   the footprint up so cooled tiles measure exactly `tile_mm`, unless the
-   slicer's filament profile already compensates (do not do both).
+7. A plain square base plate. Shrinkage is best handled in the slicer: set
+   "Shrinkage (XY)" in the OrcaSlicer filament profile (about 99.7 % for PLA)
+   so cooled tiles measure exactly 245 mm. my3dmaps can also compensate
+   (`shrinkage_pct`), but a 245 mm tile already fills the printable bed, so
+   that only works with a slightly smaller tile (e.g. 244.2 mm at 0.3 %).
+   Never do both.
 8. **Lossless decimation.** Every exactly flat face (slab bottoms, slab tops
    clipped at the next threshold, lake surfaces) is covered by rectangles and
    fanned from a centre vertex, keeping every boundary node its neighbours

@@ -48,6 +48,15 @@ def place_on_bed(footprint_mm: float) -> tuple[float, float] | None:
                     best = (d, x, y)
     return None if best is None else (best[1], best[2])
 
+
+def max_square_on_bed() -> float:
+    """Largest square footprint (mm, 0.01 mm resolution) that place_on_bed accepts."""
+    lo, hi = 0.0, BED_MM
+    while hi - lo > 0.005:
+        mid = (lo + hi) / 2.0
+        lo, hi = (mid, hi) if place_on_bed(mid) is not None else (lo, mid)
+    return round(lo, 2)
+
 NAMED_COLORS = {
     "blue": "#1f5fbf",
     "black": "#202020",
@@ -183,7 +192,7 @@ class SlicerConfig:
     extra_args: list[str] = field(default_factory=list)
     timeout_s: int = 3600
     # "auto": switch the prime tower off when the tile leaves no room for one on the bed
-    # (a 245 mm tile leaves 11 mm); "on"/"off" force it.  Applied by writing a copy of
+    # (needs a prime_tower_room_mm strip on one side of the placed, centred tile; a 200 mm tile leaves only 28 mm per side); "on"/"off" force it.  Applied by writing a copy of
     # process_preset with enable_prime_tower overridden.  The CC2 purges each colour
     # change itself (purge_in_prime_tower = 0), so no tower only loses the nozzle wipe
     # and OrcaSlicer's flush-into-infill, which needs a tower to take effect.
@@ -262,9 +271,17 @@ class ProjectConfig:
         problems = []
         if not (0.05 <= self.pitch_mm <= 5):
             problems.append("pitch_mm should be between 0.05 and 5")
-        if place_on_bed(self.tile_mm * (1 + self.shrinkage_pct / 100.0)) is None:
-            problems.append(f"a {self.tile_mm * (1 + self.shrinkage_pct / 100.0):.1f} mm tile does not fit the bed "
-                            "outside the printer's no-print zone (largest square is about 245 mm)")
+        foot = self.tile_mm * (1 + self.shrinkage_pct / 100.0)
+        if place_on_bed(foot) is None:
+            m = max_square_on_bed()
+            msg = (f"a {foot:.2f} mm tile does not fit the bed outside the printer's no-print zone "
+                   f"(largest printable square is {m:.2f} mm)")
+            if self.shrinkage_pct > 0 and self.tile_mm <= m:
+                # a 245 mm tile already uses the whole bed, so compensation has to come out of the nominal size
+                msg += (f"; shrinkage compensation needs room: use shrinkage_pct <= "
+                        f"{max(0.0, (m / self.tile_mm - 1) * 100):.2f} or tile_mm <= "
+                        f"{m / (1 + self.shrinkage_pct / 100.0):.2f}")
+            problems.append(msg)
         if not (-2.0 <= self.shrinkage_pct <= 5.0):
             problems.append("shrinkage_pct should be a small percentage (e.g. 0.3)")
         if self.rivers.enabled and self.rivers.depth_mm > self.palette.skin_depth_mm:
