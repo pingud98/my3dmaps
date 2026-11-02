@@ -112,10 +112,10 @@ class UrbanFeatures:
 
     def summary(self) -> dict:
         kinds: dict[str, int] = {}
-        for k, _, _ in self.projected:
-            kinds[k] = kinds.get(k, 0) + 1
-        area_km2 = sum(g.area for k, g, w in self.projected if g.geom_type == "Polygon") / 1e6
-        road_km = sum(g.length for k, g, w in self.projected if g.geom_type == "LineString") / 1000.0
+        for p in self.projected:
+            kinds[p[0]] = kinds.get(p[0], 0) + 1
+        area_km2 = sum(p[1].area for p in self.projected if p[1].geom_type == "Polygon") / 1e6
+        road_km = sum(p[1].length for p in self.projected if p[1].geom_type == "LineString") / 1000.0
         return {"source": self.source, "features": self.count, "by_kind": kinds,
                 "built_up_km2": round(float(area_km2), 1), "road_km": round(float(road_km), 1), "error": self.error}
 

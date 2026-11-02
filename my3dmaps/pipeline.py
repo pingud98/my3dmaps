@@ -101,6 +101,8 @@ def preview_payload(cfg: ProjectConfig, terrain: Terrain, cls: Classification) -
         "tiles": [cfg.tiles_x, cfg.tiles_y],
         "nodes_per_tile": terrain.grid.nodes_per_tile,
         "tile_mm": cfg.tile_mm,
+        "tile_mm_y": terrain.grid.nodes_per_tile_y * cfg.tile_w_mm / terrain.grid.nodes_per_tile,
+        "nodes_per_tile_y": terrain.grid.nodes_per_tile_y,
         "base_mm": cfg.base_mm,
         "skin_mm": cfg.palette.skin_depth_mm,
         "river_depth_mm": cfg.rivers.depth_mm,
@@ -151,10 +153,12 @@ def build_tiles(cfg: ProjectConfig, terrain: Terrain, cls: Classification, progr
         progress("plan", f"merged {m['from']} into {m['into']} to fit {cfg.palette.max_slots} slots", None)
 
 
-def _plan_text(cfg: ProjectConfig, tiles: list[TileBuild], cls: Classification) -> str:
+def _plan_text(cfg: ProjectConfig, tiles: list[TileBuild], cls: Classification, terrain_crs: str = "") -> str:
     lines = [f"my3dmaps print plan for '{cfg.name}'", "=" * 60, "",
-             f"Scale 1:{cfg.scale:.0f}, {cfg.tiles_x}x{cfg.tiles_y} tiles of {cfg.tile_mm:.0f} mm "
-             f"({cfg.tile_m / 1000:.1f} km per tile edge), height exaggeration {tiles[0].exaggeration:.2f}x" if tiles else "",
+             f"Scale 1:{cfg.scale:.0f}, {cfg.tiles_x}x{cfg.tiles_y} tiles of {cfg.tile_w_mm:.0f} x {cfg.tile_h_mm:.0f} mm "
+             f"({cfg.tile_m / 1000:.2f} x {cfg.tile_h_m / 1000:.2f} km per tile; whole model "
+             f"{cfg.model_mm[0]:.0f} x {cfg.model_mm[1]:.0f} mm), height exaggeration {tiles[0].exaggeration:.2f}x" if tiles else "",
+             f"Projection {terrain_crs}" if tiles else "",
              f"Elevation {cls.elev.min():.0f}-{cls.elev.max():.0f} m, model height up to "
              f"{max(t.height_mm for t in tiles):.1f} mm" if tiles else "", ""]
     if cls.pruned:
@@ -182,11 +186,22 @@ def _plan_text(cfg: ProjectConfig, tiles: list[TileBuild], cls: Classification) 
                          "Data (c) OpenStreetMap contributors, ODbL.")
     if cfg.shrinkage_pct:
         lines.append(f"Shrinkage compensation {cfg.shrinkage_pct}%: tiles are modelled "
-                     f"{cfg.tile_mm * (1 + cfg.shrinkage_pct / 100):.2f} mm square so they cool to {cfg.tile_mm:.0f} mm; "
+                     f"{cfg.tile_w_mm * (1 + cfg.shrinkage_pct / 100):.2f} x {cfg.tile_h_mm * (1 + cfg.shrinkage_pct / 100):.2f} mm "
+                     f"so they cool to {cfg.tile_w_mm:.0f} x {cfg.tile_h_mm:.0f} mm; "
                      "make sure the slicer filament profile is NOT also compensating.")
+    pinned = sorted((b.slot, b.filament or b.label or b.id, b.color) for b in cfg.palette.bands
+                    if b.slot and any(b.id == ab.id or b.id in ab.merged_ids for ab in cls.bands))
+    if pinned and not cfg.monochrome:
+        lines.append("")
+        lines.append("Filament slots (same on every tile):")
+        for sl, fil, col in pinned:
+            lines.append(f"  slot {sl}: {fil} ({col})")
     lines.append("")
     for t in tiles:
-        lines.append(f"--- {t.name} (height {t.height_mm:.1f} mm) ---")
+        tw = (f"prime tower at bed ({t.prime_tower_xy[0]:.0f}, {t.prime_tower_xy[1]:.0f}) mm"
+              if t.prime_tower_xy else "no room for a prime tower")
+        lines.append(f"--- {t.name} (height {t.height_mm:.1f} mm; tile corner at bed "
+                     f"({t.bed_offset_mm[0]:.1f}, {t.bed_offset_mm[1]:.1f}) mm; {tw}) ---")
         for o in t.objects:
             lines.append(f"  slot {o.extruder}: {o.name:24s} {o.color}  z {min(r.z_min for r in t.ranges if r.color == o.color):6.1f}"
                          f" - {max(r.z_max for r in t.ranges if r.color == o.color):6.1f} mm")
@@ -241,13 +256,26 @@ def build_project(cfg: ProjectConfig, out_dir: str | Path, progress: Progress = 
         summ["files"] = {"3mf": str(tdir / f"{t.name}.3mf"), "stl": [str(s.stl_path) for s in stls]}
         if do_slice:
             progress("slice", f"slicing {t.name}", None)
-            res = slice_tile(cfg.slicer, stls, tdir / "sliced", t.name, t.plan.swaps, footprint_mm=t.footprint_mm)
+            res = slice_tile(cfg.slicer, stls, tdir / "sliced", t.name, t.plan.swaps, footprint_mm=t.footprint_mm,
+                             footprint_y_mm=t.footprint_y_mm, tower_xy=t.prime_tower_xy)
             summ["slice"] = {"ok": res.ok, "message": res.message, "gcode": str(res.gcode_path) if res.gcode_path else None,
                              "log": str(res.log_path), "swaps_inserted": res.swaps_inserted, "command": res.command}
         tile_summaries.append(summ)
 
+    overlay_info = None
+    if cfg.overlay.enabled:
+        from .overlay import build_overlay, write_topview_png
+
+        progress("overlay", "drawing the film overlay (overlay.svg)", 0.96)
+        ores = build_overlay(cfg, terrain.grid, terrain.elev, out / "overlay.svg", exaggeration,
+                             lambda m: progress("overlay", m, None))
+        write_topview_png(cfg, terrain.grid, cls, exaggeration, out / "overlay_relief_topview.png")
+        overlay_info = ores.stats | {"svg": str(ores.svg_path)}
+        if ores.stats.get("osm_error"):
+            raise RuntimeError(f"overlay names/symbols could not be fetched ({ores.stats['osm_error']}); try again later")
+
     summary = {
-        "name": cfg.name, "version": __version__, "seconds": round(time.time() - t0, 1),
+        "name": cfg.name, "version": __version__, "overlay": overlay_info, "seconds": round(time.time() - t0, 1),
         "exaggeration": exaggeration, "relief_m": terrain.relief_m,
         "elevation_min_m": float(terrain.elev.min()), "elevation_max_m": float(terrain.elev.max()),
         "classification": cls.summary(), "dem": terrain.dem_info,
@@ -258,7 +286,7 @@ def build_project(cfg: ProjectConfig, out_dir: str | Path, progress: Progress = 
         "out_dir": str(out),
     }
     (out / "summary.json").write_text(json.dumps(summary, indent=2))
-    (out / "PRINT_PLAN.txt").write_text(_plan_text(cfg, tiles, cls))
+    (out / "PRINT_PLAN.txt").write_text(_plan_text(cfg, tiles, cls, terrain.grid.crs.name))
     used = ProjectConfig.from_dict(cfg.to_dict())
     used.exaggeration = exaggeration
     used.save(out / "project.json")

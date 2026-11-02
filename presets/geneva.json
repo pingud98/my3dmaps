@@ -10,7 +10,7 @@
   "exaggeration": 2.0,
   "base_mm": 3.0,
   "max_height_mm": 180,
-  "pitch_mm": 0.5,
+  "pitch_mm": 0.25,
   "dem_source": "srtmgl1",
   "water": true,
   "rivers": {

@@ -70,7 +70,7 @@ def create_app(presets_dir: str | Path = "presets", out_dir: str | Path = "out")
 
     def terrain_key(cfg: ProjectConfig, nodes: int) -> str:
         return json.dumps([round(cfg.center_lat, 6), round(cfg.center_lon, 6), cfg.scale, cfg.tiles_x, cfg.tiles_y,
-                           cfg.tile_mm, cfg.dem_source, cfg.water, nodes,
+                           cfg.tile_mm, cfg.tile_mm_y, cfg.crs, cfg.center_xy, cfg.dem_source, cfg.water, nodes,
                            cfg.rivers.enabled and sorted(cfg.rivers.active_classes(cfg.scale)),
                            cfg.urban.enabled and [sorted(cfg.urban.landuse), sorted(cfg.urban.roads)]])
 
@@ -123,7 +123,7 @@ def create_app(presets_dir: str | Path = "presets", out_dir: str | Path = "out")
     @app.post("/api/grid")
     def grid(config: dict[str, Any]):
         cfg = ProjectConfig.from_dict(config)
-        return {"tile_km": cfg.tile_m / 1000, "tiles": tile_outlines_lonlat(cfg), "pitch_m": cfg.pitch_m,
+        return {"tile_km": cfg.tile_m / 1000, "tile_h_km": cfg.tile_h_m / 1000, "tiles": tile_outlines_lonlat(cfg), "pitch_m": cfg.pitch_m,
                 "nodes_per_tile": cfg.nodes_per_tile}
 
     @app.post("/api/preview")

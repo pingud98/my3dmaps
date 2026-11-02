@@ -32,7 +32,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .config import BED_CLEARANCE_MM, BED_MM, SlicerConfig, place_on_bed
+from .config import SlicerConfig, place_on_bed, tower_strip
 from .plan import Swap
 
 CANDIDATE_NAMES = ["orca-slicer", "OrcaSlicer", "orcaslicer", "elegoo-slicer", "ElegooSlicer", "bambu-studio"]
@@ -162,30 +162,39 @@ def insert_pauses(gcode_in: Path, gcode_out: Path, swaps: list[Swap], pause_gcod
     return inserted
 
 
-def wants_prime_tower(cfg: SlicerConfig, footprint_mm: float) -> bool:
-    """"auto": keep the tower only if the strip beside the *placed* tile (the tile
-    is centred, so the free bed is split between both sides) is wide enough."""
+def wants_prime_tower(cfg: SlicerConfig, footprint_mm: float, footprint_y_mm: float | None = None) -> bool:
+    """"auto": keep the tower only if the strip beside the *placed* tile is wide enough."""
     if cfg.prime_tower == "on":
         return True
     if cfg.prime_tower == "off":
         return False
-    pos = place_on_bed(footprint_mm)
+    w, h = footprint_mm, footprint_y_mm or footprint_mm
+    pos = place_on_bed(w, h)
     if pos is None:
         return False
-    x, y = pos
-    widest = max(x, y, BED_MM - x - footprint_mm, BED_MM - y - footprint_mm) - BED_CLEARANCE_MM
-    return widest >= cfg.prime_tower_room_mm
+    return tower_strip(pos[0], pos[1], w, h)[0] >= cfg.prime_tower_room_mm
 
 
-def process_with_prime_tower(process_preset: str, enable: bool, out_dir: Path) -> str:
+def process_with_prime_tower(process_preset: str, enable: bool, out_dir: Path,
+                             tower_xy: tuple[float, float] | None = None) -> str:
     """Copy of the exported process preset with enable_prime_tower forced (OrcaSlicer
-    preset JSON stores booleans as "0"/"1").  Returns the path to use."""
+    preset JSON stores booleans as "0"/"1") and, when given, the tower placed at
+    ``tower_xy`` (wipe_tower_x / wipe_tower_y, the tower's lower-left corner, kept
+    in the same scalar-or-list form the preset uses).  Returns the path to use."""
     src = Path(process_preset)
     d = json.loads(src.read_text())
     want = "1" if enable else "0"
-    if str(d.get("enable_prime_tower", "")) == want:
-        return process_preset
+    changed = str(d.get("enable_prime_tower", "")) != want
     d["enable_prime_tower"] = want
+    if enable and tower_xy is not None:
+        for key, v in (("wipe_tower_x", tower_xy[0]), ("wipe_tower_y", tower_xy[1])):
+            val = f"{v:.1f}"
+            new = [val] if isinstance(d.get(key), list) or key not in d else val
+            if d.get(key) != new:
+                d[key] = new
+                changed = True
+    if not changed:
+        return process_preset
     if "name" in d:
         d["name"] = f"{d['name']} (my3dmaps, prime tower {'on' if enable else 'off'})"
     dst = out_dir / f"process_{'tower' if enable else 'notower'}.json"
@@ -194,7 +203,8 @@ def process_with_prime_tower(process_preset: str, enable: bool, out_dir: Path) -
 
 
 def slice_tile(cfg: SlicerConfig, inputs: list[SliceInput], out_dir: Path, plate_name: str,
-               swaps: list[Swap] | None = None, dry_run: bool = False, footprint_mm: float | None = None) -> SliceResult:
+               swaps: list[Swap] | None = None, dry_run: bool = False, footprint_mm: float | None = None,
+               footprint_y_mm: float | None = None, tower_xy: tuple[float, float] | None = None) -> SliceResult:
     # absolute: the slicer runs with cwd=out_dir, so relative paths on its command line would double up
     out_dir = Path(out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -202,7 +212,8 @@ def slice_tile(cfg: SlicerConfig, inputs: list[SliceInput], out_dir: Path, plate
     exe = find_executable(cfg)
     process = cfg.process_preset
     if process and footprint_mm is not None and Path(process).exists():
-        process = process_with_prime_tower(process, wants_prime_tower(cfg, footprint_mm), out_dir)
+        process = process_with_prime_tower(process, wants_prime_tower(cfg, footprint_mm, footprint_y_mm), out_dir,
+                                           tower_xy)
     assemble = write_assemble_list(out_dir / "assemble.json", inputs, plate_name)
     n_slots = max([i.filament for i in inputs] + [1])
     filaments = list(cfg.filament_presets)

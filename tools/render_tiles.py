@@ -92,7 +92,9 @@ async def main() -> None:
     prefix = args.prefix or summary["name"]
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    tile_mm = float(json.loads((root / "project.json").read_text())["tile_mm"])
+    proj = json.loads((root / "project.json").read_text())
+    tile_mm = float(proj["tile_mm"])
+    tile_mm_y = float(proj.get("tile_mm_y") or tile_mm)
 
     def bed_off(t: dict) -> tuple[float, float]:
         return tuple(t.get("bed_offset_mm") or [(256.0 - tile_mm) / 2.0] * 2)
@@ -112,7 +114,7 @@ async def main() -> None:
                                     args.width, args.height, 2.05, root, port)
                 print(f"{png}  ({info['triangles']} triangles)")
             items = [{"url": f"{t['name']}/preview.glb", "dx": t["tx"] * (tile_mm + args.gap_mm) - bed_off(t)[0],
-                      "dy": t["ty"] * (tile_mm + args.gap_mm) - bed_off(t)[1]} for t in summary["tiles"]]
+                      "dy": t["ty"] * (tile_mm_y + args.gap_mm) - bed_off(t)[1]} for t in summary["tiles"]]
             png = out / f"{prefix}_assembly.png"
             info = await render(page, png, items, args.width, args.height, 1.9, root, port)
             print(f"{png}  ({info['triangles']} triangles)")

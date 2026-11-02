@@ -32,12 +32,56 @@ def test_overpass_query_classes_and_bbox():
     assert "[bbox:45.60000,5.50000,46.60000,7.50000]" in q
     assert '"waterway"~"^(river|canal)$"' in q and "stream" not in q
     assert 'relation["natural"="water"]' in q
+    assert '"water"~"^(river|canal)$"' in q
+    q2 = overpass_query((5.5, 45.6, 7.5, 46.6), ["river"])
+    assert "canal" not in q2  # no canal lines and no canal areas when canals are off
 
 
-def test_active_classes_gates_streams_by_scale():
+def test_active_classes_gates_streams_and_canals_by_scale():
     cfg = ProjectConfig()
     assert cfg.rivers.active_classes(50000) == ["river", "canal", "stream"]
-    assert cfg.rivers.active_classes(250000) == ["river", "canal"]
+    assert cfg.rivers.active_classes(200000) == ["river"]
+    cfg.rivers.canal_max_scale = 300000
+    assert cfg.rivers.active_classes(200000) == ["river", "canal"]
+
+
+def test_clean_river_cells_fills_narrow_gaps_and_drops_fragments():
+    from my3dmaps.classify import clean_river_cells
+
+    river = np.zeros((40, 60), bool)
+    water = np.zeros_like(river)
+    river[10:13, 5:55] = True   # a river ...
+    river[15:18, 5:55] = True   # ... and a canal beside it, 2 cells (1.0 mm at 0.5 mm pitch) apart
+    river[30:32, 20:22] = True  # a lone 2x2 fragment = 1 mm^2
+    water[25:40, 50:60] = True  # a lake ...
+    river[22:25, 52:54] = True  # ... with a tiny river mouth touching it
+    out = clean_river_cells(river, water, 0.5, 1.2, 5.0)
+    assert out[13:15, 10:50].all()          # the unprintable 1 mm strip is now blue
+    assert not out[30:32, 20:22].any()      # the fragment is gone
+    assert out[22:25, 52:54].all()          # the mouth is kept: it is connected to the lake
+    assert not (out & water).any()          # lake cells are never river cells
+    wide = np.zeros_like(river)
+    wide[10:13, 5:55] = True
+    wide[16:19, 5:55] = True                # 3 cells = 1.5 mm apart: printable, left alone
+    assert not clean_river_cells(wide, np.zeros_like(wide), 0.5, 1.2, 0.0)[13:16, 10:50].any()
+
+
+def test_width_hierarchy_widens_long_named_rivers():
+    from my3dmaps.rivers import width_multipliers
+
+    rc = ProjectConfig().rivers  # ref 15 km, cap 2.5
+    long_a = LineString([(0, 0), (30000, 0)])
+    long_b = LineString([(30000, 0), (60000, 0)])   # same river, second way: 60 km in total
+    short = LineString([(0, 5000), (5000, 5000)])
+    proj = [("river", long_a, None, "Le Rhône"), ("river", long_b, None, "Le Rhône"),
+            ("river", short, None, "La Sallanche"), ("stream", long_a, None, "Big stream"),
+            ("river", LineString([(0, 0), (500000, 0)]), None, "")]
+    m = width_multipliers(proj, rc)
+    assert m[0] == m[1] == pytest.approx(2.0)       # sqrt(60 / 15)
+    assert m[2] == 1.0 and m[3] == 1.0              # short river, and streams, keep the minimum
+    assert m[4] == rc.max_width_mult                # capped
+    rc.width_by_length = False
+    assert width_multipliers(proj, rc) == [1.0] * 5
 
 
 def test_parse_elements_ways_areas_relations_and_tunnels():

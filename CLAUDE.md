@@ -159,6 +159,30 @@ Decisions made while implementing (these refine the sections above):
   clutter at that scale anyway.  Blue therefore spans the whole height of a
   hilly tile, so with `overflow: "swap"` the planner keeps blue resident and
   swaps among the other three slots.
+- **River legibility (user report 2026-09-30, Martigny on Geneva tile x1_y0):**
+  the Rhône plain printed as parallel blue stripes and fragments.  Cause:
+  ~180 canal ways (Canal de Fully / du Syndicat drainage canals, meunières,
+  bisses) beside ~40 river ways, each widened to the same 1.2 mm (240 m at
+  1:200k) as the Rhône.  Fixes: (1) canals, like streams, only at 1:60,000 or
+  larger (`canal_max_scale`; canal *areas* are dropped from the query too);
+  Liverpool at 1:50k keeps the Ship Canal and the Leeds–Liverpool canal.
+  (2) `classify.clean_river_cells` after rasterising: morphological closing of
+  river ∪ lake/sea fills land strips narrower than `min_gap_mm` (1.2 mm), and
+  8-connected blue components under `min_fragment_mm2` (5 mm²) are dropped;
+  river mouths count as part of their lake.  (3) Width hierarchy
+  (`width_by_length`): a river line's printable minimum is multiplied by
+  sqrt(length / `length_ref_km` 15), capped at 2.5, where length is the total
+  of same-named ways that connect (common names like "Le Foron" are several
+  unrelated streams).  Geneva: Arve 3.0 mm, Fier 2.5, Rhône 2.2, small
+  torrents 1.2.
+- **Mesh pitch 0.25 mm (user decision 2026-09-30):** the user prefers a
+  slower, finer print to a faceted one and has a 64 GB Xeon for slicing.
+  SRTM's 30 m samples are 0.15 mm apart at 1:200k, so 0.5 mm was discarding
+  real relief, and colour/river edges stepped in 0.5 mm stairs.  Cost for the
+  Geneva 2 × 2 set on the 11 GB aarch64 dev box: 142 s, 4.0 GB peak RSS,
+  5–6 M triangles per tile, Mont Blanc tile 3MF 67 MB / STLs 320 MB.  Now the
+  default and used by both presets; the UI preview is unaffected (96 nodes
+  per tile).
 - **Urban overlay (2026-09-18):** `urban.enabled` (default false; `--urban`
   on the CLI, checkbox in the UI).  One Overpass query for
   `landuse=residential|industrial|commercial|retail` (ways + multipolygon
@@ -258,6 +282,38 @@ Decisions made while implementing (these refine the sections above):
   96 nodes/tile, so the exaggeration slider is instant; tile walls show the slab
   colours.  Rivers appear in the preview because they are ordinary water-class
   cells (rasterised at ≥1 preview cell wide).
+- **Liverpool framed print (user brief 2026-11-02):** frame window 30 × 40 cm
+  (read as portrait, 300 wide × 400 tall), 11 mm deep; relief 35 × 45 cm so
+  its edges hide 25 mm behind the frame on every side.  Implemented as
+  2 × 2 **rectangular tiles** of 175 × 225 mm (`tile_mm_y`, new) at 1:50,000.
+  The model is projected on the **OS National Grid** (`crs: "EPSG:27700"`,
+  `center_xy` SJ 355 900, new) so the overlay's grid lines are straight and
+  axis-aligned; the window is exactly E 328–343 km, N 380–400 km.  Height:
+  `max_height_mm` 10.5 (0.5 mm under the frame depth), `base_mm` 2.0 (the
+  minimum `validate()` allows) → auto exaggeration ≈ 3.3×.  Four filaments
+  pinned to slots on every tile (`BandConfig.slot`, new): 1 glossy blue
+  (water + base), 2 matte army dark green (lowland), 3 matte army beige
+  (shore / docks below 8 m; slots 2/3 set by the user 2026-11-02 to match
+  the loaded spools), 4 matte wood brown (above 45 m: the Everton–Woolton
+  and Wirral sandstone ridges, ~20 % of land).  SRTM roof/tree noise made
+  camouflage patterns at the 8 m threshold, so skin colours now come from a
+  DEM smoothed by `palette.classify_smooth_m` (60 m) and islands under
+  `palette.despeckle_mm2` (3 mm²) are repainted; slabs are unaffected.
+- **Prime tower (2026-11-02, reverses the 245 mm "auto" outcome for this
+  preset):** `slicer.prime_tower: "on"` makes `place_on_bed` choose a bed
+  position that leaves a ≥ `prime_tower_room_mm` (35) strip — a 175 × 225 tile
+  goes to x 0.5 and leaves a 78 mm strip on the right, clear of the no-print
+  zone — and the process preset copy gets `wipe_tower_x/y` for it.
+  `validate()` rejects "on" when the tile leaves no room.
+- **Film overlay (2026-11-02):** `my3dmaps/overlay.py`, `overlay.enabled`.
+  Black-only SVG, page = frame window, 1:1.  Contours from SRTM (public
+  domain, 75 m smoothing, 10 m / 50 m index, labelled), names and symbols from
+  OSM (ODbL; one Overpass query, cached), British National Grid 1 km lines
+  numbered in the border + 100 km letters, seam triangles for aligning the film
+  to the glued tile joints, title / scale bar / credits on the bottom edge.
+  Masks (not white ink) keep the film clear under labels.  Long-distance ferry
+  routes are dropped (they only trace the shipping channel).  Contour tracing
+  is a small marching-squares in numpy (no skimage in the venv).
 - **Not done / next:** headless-slicer verification on a real install;
   urban-heuristic for Liverpool (elevation+slope reads fine as tidal flats +
   low hills, so no extra land-cover layer was needed).  Lossy terrain

@@ -40,7 +40,12 @@ exaggeration (about 49 mm tall, so it fits a 6 cm deep frame under glass), five 
 
 ### Liverpool and the Mersey, 1:50,000, 2 × 2 tiles
 
-Low relief at 8× exaggeration. Rock and snow are pruned; the shore band
+The current `presets/liverpool.json` is the framed print (2026-11-02): 2 × 2
+tiles of 175 × 225 mm (350 × 450 mm, portrait) behind a 300 × 400 mm frame
+window, at most 10.5 mm tall (3.3×), on the OS National Grid, in four
+filaments (slots 1–4: glossy blue, army dark green, army beige, wood brown), with a black
+film overlay (`overlay.svg`). The pictures below are from the earlier square
+2 × 2 × 245 mm version at 8×. Rock and snow are pruned; the shore band
 marks tidal flats. Rivers, canals and brooks are drawn from OpenStreetMap.
 
 ![Liverpool assembly](docs/images/liverpool_assembly.png)
@@ -97,9 +102,26 @@ my3dmaps serve                          # web UI at http://127.0.0.1:8000
 my3dmaps info  presets/geneva.json      # fetch data, report bands / relief / suggested exaggeration
 my3dmaps build presets/liverpool.json --out out/liverpool        # 3MF + STL per tile, PRINT_PLAN.txt
 my3dmaps build presets/geneva.json --out out/geneva --slice      # ... and run OrcaSlicer headlessly
+my3dmaps overlay presets/liverpool.json --out out/liverpool      # only the film overlay SVG (+ relief top view)
 my3dmaps slicer probe                   # check which CLI flags the installed slicer supports
 my3dmaps slicer run out/geneva/tile_x0_y0 --dry-run              # print the slicer command for one tile
 ```
+
+### Film overlay (`overlay.enabled`)
+
+`overlay.svg` is a black-only sheet the size of the frame window
+(`overlay.window_mm`, centred on the model), to print at 100 % on transparent
+film and lay on the glass. It holds contours from SRTM (smoothed, every
+`contour_m`, labelled index contours), OpenStreetMap place names, railways
+(tunnels dashed), motorways, local ferries, stations, stadiums, lighthouses,
+named hills and river names, a grid in `overlay.grid_crs` (OS National Grid
+by default) numbered in the border with the 100 km square letters, small
+triangles where the glued tiles meet (to line the film up with the seams), and
+the title, scale bar and data credits along the bottom. Masks keep the film
+clear under labels and down the middle of motorways; nothing is printed white.
+`overlay_relief_topview.png` is a shaded top view of the relief cropped to the
+same window; `python3 tools/compose_overlay.py out/<name>` stacks the two
+into `overlay_check.png` (headless Chromium) for checking.
 
 Overrides: `--scale 100000 --tiles 2x2 --exaggeration 2 --pitch 0.4 --shrinkage 0.3 --no-rivers --urban`.
 Set `"monochrome": true` in a project (or tick *single-colour draft* in the UI) for a one-filament draft print.
@@ -176,7 +198,12 @@ the command it would have run to `sliced/slicer.log`.
    → shore, flat water → blue. **Rivers** are painted into this skin as a
    thinner blue layer (`rivers.depth_mm`, 0.6 mm) that follows the terrain,
    widened to at least `rivers.min_width_mm` (1.2 mm, about three lines of a
-   0.4 mm nozzle) so even a brook prints. The optional **urban** overlay
+   0.4 mm nozzle) so even a brook prints. Long rivers are drawn wider, up to
+   2.5×, so the main rivers stand out. Green gaps too narrow to print are
+   filled and tiny blue fragments dropped. Streams and canals are only
+   included at 1:60,000 or larger: at smaller scales canals are mostly
+   drainage and irrigation ditches that would print as parallel clutter
+   beside the river. The optional **urban** overlay
    (`urban.enabled`, off by default) works the same way in dark grey.
 6. Bands with no area are pruned. With more colours than slots, the two least
    distinct adjacent bands merge, or with `overflow: "swap"` a manual filament
@@ -191,9 +218,17 @@ the command it would have run to `sliced/slicer.log`.
 8. **Lossless decimation.** Every exactly flat face (slab bottoms, slab tops
    clipped at the next threshold, lake surfaces) is covered by rectangles and
    fanned from a centre vertex, keeping every boundary node its neighbours
-   use. Geometry is identical; Liverpool's per-tile STLs drop from 95 MB to
-   50 MB and Geneva's whole project from 1 GB to 0.5 GB.
+   use. Geometry is identical, and files are roughly half the size they
+   would otherwise be.
 9. Export 3MF, STLs, GLB, plan.
+
+**Mesh resolution.** The default grid is 0.25 mm (`pitch_mm`), finer than
+the 0.4 mm nozzle, so slopes print without visible facets and colour edges
+don't step. At 1:200,000 SRTM's 30 m samples are 0.15 mm apart, so this is
+real relief, not interpolation. A 245 mm tile is 5 to 6 million triangles:
+the Mont Blanc tile's 3MF is 67 MB and its STLs 320 MB. Building the four
+Geneva tiles takes about 2.5 minutes and 4 GB of memory. Use `--pitch 0.5`
+for quick drafts.
 
 ## Configuration
 
@@ -202,6 +237,8 @@ A project is one JSON file (see `presets/`). The important fields:
 | Field | Meaning |
 |---|---|
 | `center_lat`, `center_lon`, `scale`, `tiles_x`, `tiles_y` | Where, how big (1:`scale`), how many tiles |
+| `tile_mm`, `tile_mm_y` | Tile width and (optional, for rectangular tiles) height on the print |
+| `crs`, `center_xy` | Model projection (`utm` = auto zone, or e.g. `EPSG:27700`) and an optional centre in its metres, so grid lines fall on round numbers |
 | `exaggeration` | Height multiplier; `null` picks one that gives ~45 mm of relief per tile |
 | `base_mm`, `max_height_mm`, `pitch_mm` | Base plate thickness, height budget, mesh pitch on the print |
 | `palette.bands[]` | Ordered bands with `color`, `from_m` or `from_water_m`, optional `slope_deg`, `max_distance_m`, `requires_water` |
@@ -211,6 +248,10 @@ A project is one JSON file (see `presets/`). The important fields:
 | `shrinkage_pct` | XY scale-up for glued tiles (default 0) |
 | `slicer` | Executable and exported preset paths |
 | `monochrome` | One-filament draft print |
+| `palette.bands[].slot`, `.filament` | Pin a band's colour to a physical slot on every tile (and name the filament in the plan) |
+| `palette.classify_smooth_m`, `palette.despeckle_mm2` | Smooth the DEM before choosing surface colours; repaint colour islands smaller than this |
+| `slicer.prime_tower` | `auto`/`on`/`off`; `on` also places the tile beside a free `prime_tower_room_mm` strip and writes `wipe_tower_x/y` |
+| `overlay` | Film overlay: `enabled`, `window_mm`, margins, `grid_crs`, `contour_m`, `places`, `symbols`, `title`, `labels` |
 
 ## Data and licensing
 

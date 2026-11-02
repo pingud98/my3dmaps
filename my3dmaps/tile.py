@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .classify import Classification
-from .config import ProjectConfig, place_on_bed
+from .config import ProjectConfig, tower_strip
 from .geo import Grid
 from .mesh import Mesh, MeshObject, concat, sheet_mesh
 from .plan import ColorRange, SlotPlan, plan_slots
@@ -37,8 +37,10 @@ class TileBuild:
     z_datum_m: float
     exaggeration: float
     ranges: list[ColorRange] = field(default_factory=list)
-    footprint_mm: float = 0.0  # printed footprint after shrinkage compensation
+    footprint_mm: float = 0.0  # printed footprint width (x) after shrinkage compensation
     bed_offset_mm: tuple[float, float] = (0.0, 0.0)  # where the tile's (0,0) corner sits on the bed
+    footprint_y_mm: float = 0.0  # printed footprint height (y); 0 = square
+    prime_tower_xy: tuple[float, float] | None = None  # suggested tower corner on the bed (None: no room)
 
     @property
     def name(self) -> str:
@@ -52,6 +54,8 @@ class TileBuild:
                          "triangles": int(len(o.mesh.faces))} for o in self.objects],
             "plan": self.plan.to_dict(),
             "footprint_mm": round(self.footprint_mm, 3),
+            "footprint_y_mm": round(self.footprint_y_mm or self.footprint_mm, 3),
+            "prime_tower_xy": None if self.prime_tower_xy is None else [round(v, 1) for v in self.prime_tower_xy],
             "bed_offset_mm": [round(v, 3) for v in self.bed_offset_mm],
         }
 
@@ -62,9 +66,9 @@ def z_of(elev_m, cfg: ProjectConfig, z_datum_m: float, exaggeration: float):
 
 
 def base_plate(cfg: ProjectConfig) -> Mesh:
-    """Plain square base plate, ``base_mm`` thick (tiles are glued edge to edge)."""
-    xs = np.array([0.0, cfg.tile_mm])
-    ys = np.array([0.0, cfg.tile_mm])
+    """Plain rectangular base plate, ``base_mm`` thick (tiles are glued edge to edge)."""
+    xs = np.array([0.0, cfg.tile_w_mm])
+    ys = np.array([0.0, cfg.tile_h_mm])
     top = np.full((2, 2), cfg.base_mm)
     bot = np.zeros_like(top)
     return sheet_mesh(xs, ys, top, bot, np.ones((1, 1), dtype=bool))
@@ -92,9 +96,8 @@ def build_tile(cfg: ProjectConfig, grid: Grid, cls: Classification, tx: int, ty:
     js, is_ = grid.tile_slices(tx, ty)
     e = cls.elev[js, is_]
     cells_cls = cls.cells[js.start:js.stop - 1, is_.start:is_.stop - 1]
-    n = e.shape[0]
-    xs = np.linspace(0.0, cfg.tile_mm, n)
-    ys = np.linspace(0.0, cfg.tile_mm, n)
+    xs = np.linspace(0.0, cfg.tile_w_mm, e.shape[1])
+    ys = np.linspace(0.0, cfg.tile_h_mm, e.shape[0])
     sub = (slice(js.start, js.stop - 1), slice(is_.start, is_.stop - 1))
     thin = [(None if cls.river_cells is None else cls.river_cells[sub], cfg.rivers.depth_mm),
             (None if cls.urban_cells is None else cls.urban_cells[sub], cfg.urban.depth_mm)]
@@ -149,29 +152,56 @@ def build_tile(cfg: ProjectConfig, grid: Grid, cls: Classification, tx: int, ty:
     ranges = [ranges[i] for i in order]
 
     plan = plan_slots(ranges, cfg.palette.max_slots)
+    # pinned slots (BandConfig.slot): every tile uses the same filament layout, so nothing is reloaded between tiles
+    pinned: dict[str, int] = {}
+    for b in cls.bands:
+        for bid in [b.id] + list(b.merged_ids):
+            try:
+                sl = cfg.palette.band(bid).slot
+            except KeyError:
+                sl = None
+            if sl and b.color not in pinned:
+                pinned[b.color] = int(sl)
+    colors = [r.color for r in ranges]
+    if (plan.feasible and not plan.swaps and all(c in pinned for c in colors)
+            and len({pinned[c] for c in colors}) == len(colors) and max(pinned[c] for c in colors) <= cfg.palette.max_slots):
+        plan.slots = {c: pinned[c] for c in colors}
+        initial = [""] * max(pinned[c] for c in colors)
+        for c in colors:
+            initial[pinned[c] - 1] = c
+        plan.initial = initial
     for o in objects:
         o.extruder = plan.slots.get(o.color, 0) or 1
 
     # shrinkage compensation: scale XY about the tile centre so the cooled part measures tile_mm
     f = 1.0 + cfg.shrinkage_pct / 100.0
     if abs(f - 1.0) > 1e-9:
-        c = cfg.tile_mm / 2.0
+        cx, cy = cfg.tile_w_mm / 2.0, cfg.tile_h_mm / 2.0
         for o in objects:
             v = o.mesh.vertices.copy()
-            v[:, 0] = c + (v[:, 0] - c) * f
-            v[:, 1] = c + (v[:, 1] - c) * f
+            v[:, 0] = cx + (v[:, 0] - cx) * f
+            v[:, 1] = cy + (v[:, 1] - cy) * f
             o.mesh = Mesh(v, o.mesh.faces)
 
-    # bed placement: centred, or nudged clear of the printer's no-print zone
+    # bed placement: centred (or, when a prime tower is wanted, beside a free strip), clear of the no-print zone
     offset = (0.0, 0.0)
+    fw, fh = cfg.tile_w_mm * f, cfg.tile_h_mm * f
+    tower = None
     if place:
-        foot = cfg.tile_mm * f
-        pos = place_on_bed(foot)
+        pos = cfg.bed_position()
         if pos is None:
-            raise ValueError(f"a {foot:.1f} mm tile does not fit the bed outside the no-print zone")
-        # the shrinkage scaling kept the tile centred on tile_mm/2, so its corner is at -(foot - tile_mm)/2
-        offset = (pos[0] + (foot - cfg.tile_mm) / 2.0, pos[1] + (foot - cfg.tile_mm) / 2.0)
+            raise ValueError(f"a {fw:.1f} x {fh:.1f} mm tile does not fit the bed outside the no-print zone")
+        # the shrinkage scaling kept the tile centred, so its corner is at -(foot - nominal)/2
+        offset = (pos[0] + (fw - cfg.tile_w_mm) / 2.0, pos[1] + (fh - cfg.tile_h_mm) / 2.0)
         for o in objects:
             o.mesh = o.mesh.translated((offset[0], offset[1], 0.0))
+        room, (sx0, sy0, sx1, sy1) = tower_strip(pos[0], pos[1], fw, fh)
+        if room >= cfg.slicer.prime_tower_room_mm:
+            # tower's lower-left corner: centred across the strip, centred along the tile
+            tw = cfg.slicer.prime_tower_room_mm
+            if sy1 - sy0 > sx1 - sx0:  # vertical strip
+                tower = ((sx0 + sx1 - tw) / 2.0, max(sy0, pos[1] + fh / 2.0 - 30.0))
+            else:
+                tower = (max(sx0, pos[0] + fw / 2.0 - 30.0), (sy0 + sy1 - tw) / 2.0)
 
-    return TileBuild(tx, ty, objects, plan, float(ez.max()), z_datum_m, exaggeration, ranges, cfg.tile_mm * f, offset)
+    return TileBuild(tx, ty, objects, plan, float(ez.max()), z_datum_m, exaggeration, ranges, fw, offset, fh, tower)

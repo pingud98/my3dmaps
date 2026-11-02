@@ -45,13 +45,13 @@ const handleIcon = L.divIcon({ className: 'handle', iconSize: [14, 14] });
 const cornerHandle = L.marker([46.5, 6.9], { draggable: true, icon: handleIcon, title: 'drag to change scale' }).addTo(map);
 let gridBounds = null;
 
-centerMarker.on('drag', (e) => { const p = e.target.getLatLng(); cfg.center_lat = p.lat; cfg.center_lon = p.lng; syncCenterInputs(); });
+centerMarker.on('drag', (e) => { const p = e.target.getLatLng(); cfg.center_lat = p.lat; cfg.center_lon = p.lng; cfg.center_xy = null; syncCenterInputs(); });
 centerMarker.on('dragend', () => { updateGrid(); schedulePreview(); });
 cornerHandle.on('drag', (e) => {
   const p = e.target.getLatLng();
   const dLat = Math.abs(p.lat - cfg.center_lat), dLon = Math.abs(p.lng - cfg.center_lon);
   const halfH = dLat * 110574, halfW = dLon * 111320 * Math.cos(cfg.center_lat * Math.PI / 180);
-  const needW = 2 * halfW / (cfg.tiles_x * cfg.tile_mm / 1000), needH = 2 * halfH / (cfg.tiles_y * cfg.tile_mm / 1000);
+  const needW = 2 * halfW / (cfg.tiles_x * cfg.tile_mm / 1000), needH = 2 * halfH / (cfg.tiles_y * (cfg.tile_mm_y || cfg.tile_mm) / 1000);
   const s = niceScale(Math.max(needW, needH));
   if (s !== cfg.scale) { cfg.scale = s; fillScaleSelect(); updateGrid(false); }
 });
@@ -68,8 +68,9 @@ async function updateGrid(moveHandle = true) {
     }
     gridBounds = L.latLngBounds([minLat, minLon], [maxLat, maxLon]);
     if (moveHandle) cornerHandle.setLatLng([maxLat, maxLon]);
-    const total = `${fmtKm(cfg.tiles_x * g.tile_km * 1000)} × ${fmtKm(cfg.tiles_y * g.tile_km * 1000)}`;
-    $('areaInfo').textContent = `1:${cfg.scale.toLocaleString()} → ${g.tile_km.toFixed(g.tile_km < 10 ? 1 : 0)} km per tile edge, `
+    const tkh = g.tile_h_km || g.tile_km, fk = (v) => v.toFixed(v < 10 ? 1 : 0);
+    const total = `${fmtKm(cfg.tiles_x * g.tile_km * 1000)} × ${fmtKm(cfg.tiles_y * tkh * 1000)}`;
+    $('areaInfo').textContent = `1:${cfg.scale.toLocaleString()} → ${tkh === g.tile_km ? fk(g.tile_km) : fk(g.tile_km) + ' × ' + fk(tkh)} km per tile, `
       + `${cfg.tiles_x * cfg.tiles_y} tile${cfg.tiles_x * cfg.tiles_y > 1 ? 's' : ''} covering ${total}; `
       + `mesh pitch ${cfg.pitch_mm} mm = ${g.pitch_m.toFixed(0)} m on the ground (SRTM is 30 m).`;
   } catch (e) { setStatus(`grid: ${e.message}`, true); }
@@ -87,7 +88,7 @@ $('scaleSelect').onchange = (e) => { cfg.scale = Number(e.target.value); updateG
 $('tilesX').onchange = (e) => { cfg.tiles_x = Math.max(1, Number(e.target.value) | 0); updateGrid(); schedulePreview(); };
 $('tilesY').onchange = (e) => { cfg.tiles_y = Math.max(1, Number(e.target.value) | 0); updateGrid(); schedulePreview(); };
 $('centerLat').onchange = $('centerLon').onchange = () => {
-  cfg.center_lat = Number($('centerLat').value); cfg.center_lon = Number($('centerLon').value);
+  cfg.center_lat = Number($('centerLat').value); cfg.center_lon = Number($('centerLon').value); cfg.center_xy = null;
   centerMarker.setLatLng([cfg.center_lat, cfg.center_lon]); updateGrid(); fitMap(); schedulePreview(); };
 $('btnFit').onclick = fitMap;
 $('projName').onchange = (e) => { cfg.name = e.target.value.trim() || 'untitled'; };
@@ -161,7 +162,10 @@ function riverText(cls) {
   if (!r) return ' Rivers: not fetched.';
   if (r.error) return ` Rivers unavailable (${r.error}).`;
   const kinds = Object.entries(r.by_kind).map(([k, n]) => `${n} ${k}`).join(', ');
-  const streamsNote = (cfg.rivers.classes.includes('stream') && cfg.scale > cfg.rivers.stream_max_scale) ? ` (streams skipped above 1:${cfg.rivers.stream_max_scale.toLocaleString()})` : '';
+  const skipped = [];
+  if (cfg.rivers.classes.includes('stream') && cfg.scale > cfg.rivers.stream_max_scale) skipped.push(`streams above 1:${cfg.rivers.stream_max_scale.toLocaleString()}`);
+  if (cfg.rivers.classes.includes('canal') && cfg.scale > (cfg.rivers.canal_max_scale ?? 60000)) skipped.push(`canals above 1:${(cfg.rivers.canal_max_scale ?? 60000).toLocaleString()}`);
+  const streamsNote = skipped.length ? ` (skipped: ${skipped.join(', ')})` : '';
   return ` Rivers: ${r.features} OSM features${kinds ? ` (${kinds})` : ''}, ${r.length_km} km${streamsNote}, ${((cls.river_fraction || 0) * 100).toFixed(2)}% of the surface.`
     + urbanText(cls);
 }
@@ -232,8 +236,8 @@ function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [((n >> 16) & 
 function rebuildModel() {
   scene.remove(modelGroup); modelGroup = new THREE.Group(); scene.add(modelGroup);
   if (!preview) return;
-  const [ny, nx] = preview.shape, n = preview.nodes_per_tile, [TX, TY] = preview.tiles;
-  const pitch = preview.tile_mm / n, gap = 4, T = preview.tile_mm;
+  const [ny, nx] = preview.shape, n = preview.nodes_per_tile, m = preview.nodes_per_tile_y || n, [TX, TY] = preview.tiles;
+  const pitch = preview.tile_mm / n, gap = 4, T = preview.tile_mm, TH = m * pitch;
   const base = preview.base_mm, skin = preview.skin_mm, mmpm = preview.mm_per_m, datum = preview.z_datum_m;
   const zOf = (e) => base + skin + (e - datum) * mmpm * exag;
   const bands = preview.classification.bands;
@@ -245,9 +249,9 @@ function rebuildModel() {
   const push = (x, z, gy, rgb) => { pos.push(x, z, -gy); col.push(rgb[0], rgb[1], rgb[2]); };
 
   for (let ty = 0; ty < TY; ty++) for (let tx = 0; tx < TX; tx++) {
-    const ox = tx * (T + gap), oy = ty * (T + gap), j0 = ty * n, i0 = tx * n;
+    const ox = tx * (T + gap), oy = ty * (TH + gap), j0 = ty * m, i0 = tx * n;
     // surface, flat-shaded per cell
-    for (let j = j0; j < j0 + n; j++) for (let i = i0; i < i0 + n; i++) {
+    for (let j = j0; j < j0 + m; j++) for (let i = i0; i < i0 + n; i++) {
       const rgb = bandRgb[cells[j * (nx - 1) + i]] || [1, 0, 1];
       const x0 = ox + (i - i0) * pitch, x1 = x0 + pitch, y0 = oy + (j - j0) * pitch, y1 = y0 + pitch;
       const za = zOf(elev[j * nx + i]), zb = zOf(elev[j * nx + i + 1]), zc = zOf(elev[(j + 1) * nx + i + 1]), zd = zOf(elev[(j + 1) * nx + i]);
@@ -276,9 +280,9 @@ function rebuildModel() {
     for (let i = i0; i < i0 + n; i++) {
       const x0 = ox + (i - i0) * pitch, x1 = x0 + pitch;
       wall(x0, oy, x1, oy, elev[j0 * nx + i], elev[j0 * nx + i + 1], j0 * (nx - 1) + i);                    // south
-      wall(x0, oy + T, x1, oy + T, elev[(j0 + n) * nx + i], elev[(j0 + n) * nx + i + 1], (j0 + n - 1) * (nx - 1) + i); // north
+      wall(x0, oy + TH, x1, oy + TH, elev[(j0 + m) * nx + i], elev[(j0 + m) * nx + i + 1], (j0 + m - 1) * (nx - 1) + i); // north
     }
-    for (let j = j0; j < j0 + n; j++) {
+    for (let j = j0; j < j0 + m; j++) {
       const y0 = oy + (j - j0) * pitch, y1 = y0 + pitch;
       wall(ox, y0, ox, y1, elev[j * nx + i0], elev[(j + 1) * nx + i0], j * (nx - 1) + i0);                  // west
       wall(ox + T, y0, ox + T, y1, elev[j * nx + i0 + n], elev[(j + 1) * nx + i0 + n], j * (nx - 1) + i0 + n - 1); // east
@@ -290,7 +294,7 @@ function rebuildModel() {
   geo.computeVertexNormals();
   const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
   modelGroup.add(mesh);
-  const W = TX * (T + gap) - gap, H = TY * (T + gap) - gap;
+  const W = TX * (T + gap) - gap, H = TY * (TH + gap) - gap;
   modelGroup.position.set(-W / 2, 0, H / 2);
   if (!fitted) {
     const d = Math.max(W, H) * 1.3; camera.position.set(-d * 0.5, d * 0.7, d * 0.8); controls.target.set(0, 10, 0); fitted = true;
@@ -313,7 +317,7 @@ $('btnSavePreset').onclick = async () => {
 };
 function applyConfig(c) {
   cfg = c; preview = null;
-  $('projName').value = cfg.name; $('tilesX').value = cfg.tiles_x; $('tilesY').value = cfg.tiles_y; $('tileMm').textContent = cfg.tile_mm;
+  $('projName').value = cfg.name; $('tilesX').value = cfg.tiles_x; $('tilesY').value = cfg.tiles_y; $('tileMm').textContent = cfg.tile_mm_y && cfg.tile_mm_y !== cfg.tile_mm ? `${cfg.tile_mm} x ${cfg.tile_mm_y}` : cfg.tile_mm;
   $('baseColor').value = cfg.palette.base_color; $('overflow').value = cfg.palette.overflow; $('mono').checked = !!cfg.monochrome;
   if (!cfg.rivers) cfg.rivers = { enabled: true, source: 'osm', classes: ['river', 'canal', 'stream'], stream_max_scale: 60000, min_width_mm: 1.2, width_scale: 1.0, depth_mm: 0.6, default_width_m: { river: 30, canal: 15, stream: 5 } };
   $('rivers').checked = !!cfg.rivers.enabled; $('riverStreams').checked = cfg.rivers.classes.includes('stream');

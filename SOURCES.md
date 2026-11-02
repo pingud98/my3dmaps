@@ -11,6 +11,7 @@ dataset without updating this file and flagging it in the UI.**
 | Water bodies, coastline | **Natural Earth 1:10m** `ne_10m_lakes`, `ne_10m_land` | Public domain (Natural Earth places all data in the public domain). | `my3dmaps/water.py` |
 | Rivers, canals, streams (**opt-out**) | **OpenStreetMap** `waterway=river/canal/stream` lines and `natural=water` river/canal areas, via the Overpass API | **ODbL 1.0 – NOT public domain.** A printed model that contains them is an ODbL *produced work*: it may be made, sold and shared, but must be credited "© OpenStreetMap contributors" (and the extracted data itself, if you redistribute it, stays ODbL share-alike). Set `rivers.enabled=false` / untick "rivers" / `--no-rivers` for a strictly public-domain model. | `my3dmaps/rivers.py` |
 | Built-up areas, major roads (**opt-in**, off by default) | **OpenStreetMap** `landuse=residential/industrial/commercial/retail` areas and `highway=motorway/trunk/primary` lines, via Overpass | ODbL, same terms and credit as the rivers above. | `my3dmaps/urban.py` |
+| Film overlay names and symbols (`overlay.enabled`) | **OpenStreetMap** `place=*` names, railway stations and lines, motorways, ferry routes, stadiums, lighthouses, aerodromes, named peaks/hills and river/canal names, via Overpass | ODbL, same terms as the rivers above. The overlay prints the credit "Map data © OpenStreetMap contributors, ODbL" along its bottom edge. Its contours are traced from the SRTM DEM (public domain), and its grid is computed from the British National Grid definition (EPSG:27700) - **no Ordnance Survey map data is used**. | `my3dmaps/overlay.py` |
 | Web-map background (UI only) | OpenStreetMap standard tiles | © OpenStreetMap contributors, ODbL. Used only for on-screen area picking. | `my3dmaps/web/app.js` |
 
 ## SRTM details
@@ -47,8 +48,9 @@ dataset without updating this file and flagging it in the UI.**
   (`overpass-api.de`, fallback `overpass.kumi.systems`, override with
   `MY3DMAPS_OVERPASS_URL`), cached under `~/.cache/my3dmaps/osm/`.
   Overpass is a shared volunteer service: results are cached forever and
-  streams are only requested at scales of 1:60,000 or larger, because a
-  150 km Alpine box with every stream is more than it will serve.
+  streams and canals are only requested at scales of 1:60,000 or larger,
+  because a 150 km Alpine box with every stream is more than it will serve,
+  and at small scales canals are mostly ditches that print as clutter.
 * Tagged tunnels/culverts are skipped.  Width comes from the OSM `width` tag
   when present (rare), else 30 m river / 15 m canal / 5 m stream, and is then
   widened to the printable minimum (`rivers.min_width_mm`, default 1.2 mm).

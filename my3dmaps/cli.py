@@ -3,6 +3,7 @@
   my3dmaps build presets/geneva.json --out out/geneva [--slice] [--exaggeration 2]
   my3dmaps info  presets/geneva.json           # fetch data, report bands/relief/plan, no meshes
   my3dmaps grid  presets/geneva.json           # tile corner coordinates
+  my3dmaps overlay presets/liverpool.json --out out/liverpool   # film overlay SVG only
   my3dmaps serve [--port 8000]                 # web UI
   my3dmaps slicer probe [--executable PATH]    # check the OrcaSlicer CLI surface
   my3dmaps slicer run out/geneva/tile_x0_y0    # (re)slice an already built tile
@@ -75,6 +76,23 @@ def cmd_info(args):
     print(json.dumps(out, indent=2))
 
 
+def cmd_overlay(args):
+    """Overlay SVG (+ a matching relief top view) without meshing the tiles."""
+    from .overlay import build_overlay, write_topview_png
+    from .pipeline import analyze, choose_exaggeration, prepare_terrain
+
+    cfg = _load(args.project, args)
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    nodes = max(16, int(round(cfg.tile_w_mm / args.pitch_preview)))
+    terrain = prepare_terrain(cfg, _progress, nodes_per_tile=nodes)
+    cls = analyze(cfg, terrain)
+    ex, _ = choose_exaggeration(cfg, terrain)
+    res = build_overlay(cfg, terrain.grid, terrain.elev, out / "overlay.svg", ex, lambda m: _progress("overlay", m, None))
+    write_topview_png(cfg, terrain.grid, cls, ex, out / "overlay_relief_topview.png")
+    print(json.dumps(res.stats | {"svg": str(res.svg_path), "exaggeration": ex}, indent=2))
+
+
 def cmd_grid(args):
     from .geo import tile_outlines_lonlat
 
@@ -106,7 +124,8 @@ def cmd_slicer_run(args):
     inputs = [SliceInput(tdir / f"{o['name']}.stl", o["extruder"]) for o in plan["objects"]]
     swaps = [Swap(**s) for s in plan["plan"]["swaps"]]
     res = slice_tile(proj.slicer, inputs, tdir / "sliced", plan["name"], swaps, dry_run=args.dry_run,
-                     footprint_mm=plan.get("footprint_mm", proj.tile_mm))
+                     footprint_mm=plan.get("footprint_mm", proj.tile_w_mm),
+                     footprint_y_mm=plan.get("footprint_y_mm", proj.tile_h_mm), tower_xy=plan.get("prime_tower_xy"))
     print(json.dumps({"ok": res.ok, "message": res.message, "gcode": str(res.gcode_path) if res.gcode_path else None,
                       "command": res.command, "log": str(res.log_path)}, indent=2))
 
@@ -138,6 +157,12 @@ def main(argv=None):
     common(i)
     i.add_argument("--nodes", type=int, default=120, help="nodes per tile for the analysis grid")
     i.set_defaults(func=cmd_info)
+
+    o = sub.add_parser("overlay", help="draw the black film overlay SVG (contours, names, grid) for a project")
+    common(o)
+    o.add_argument("--out", required=True)
+    o.add_argument("--pitch-preview", type=float, default=0.5, help="analysis grid pitch in mm (default 0.5)")
+    o.set_defaults(func=cmd_overlay)
 
     g = sub.add_parser("grid", help="print tile outlines (lat/lon)")
     common(g)

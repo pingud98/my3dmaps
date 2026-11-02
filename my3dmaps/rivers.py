@@ -58,7 +58,7 @@ def cache_dir() -> Path:
 def overpass_query(bbox_lonlat: tuple[float, float, float, float], classes: list[str]) -> str:
     min_lon, min_lat, max_lon, max_lat = bbox_lonlat
     cls = "|".join(c for c in classes if c in LINE_CLASSES)
-    area = "|".join(AREA_WATER)
+    area = "|".join(a for a in AREA_WATER if a == "river" or a in classes)  # canal areas only with canals
     return (
         f"[out:json][timeout:180][bbox:{min_lat:.5f},{min_lon:.5f},{max_lat:.5f},{max_lon:.5f}];\n(\n"
         f'  way["waterway"~"^({cls})$"];\n'
@@ -125,7 +125,8 @@ class RiverFeatures:
     """Fetched + projected river geometry for a grid (independent of print settings)."""
 
     features: list[RiverFeature] = field(default_factory=list)  # lon/lat
-    projected: list[tuple[str, object, Optional[float]]] = field(default_factory=list)  # (kind, geom in grid CRS, width_m)
+    # (kind, geom in grid CRS, width_m[, name]); the name is optional so hand-built lists stay valid
+    projected: list[tuple] = field(default_factory=list)
     source: str = "osm"
     error: str = ""
 
@@ -134,12 +135,12 @@ class RiverFeatures:
         return len(self.projected)
 
     def length_km(self) -> float:
-        return float(sum(g.length for k, g, w in self.projected if isinstance(g, LineString)) / 1000.0)
+        return float(sum(p[1].length for p in self.projected if isinstance(p[1], LineString)) / 1000.0)
 
     def summary(self) -> dict:
         kinds: dict[str, int] = {}
-        for k, _, _ in self.projected:
-            kinds[k] = kinds.get(k, 0) + 1
+        for p in self.projected:
+            kinds[p[0]] = kinds.get(p[0], 0) + 1
         return {"source": self.source, "features": self.count, "by_kind": kinds,
                 "length_km": round(self.length_km(), 1), "error": self.error}
 
@@ -251,9 +252,9 @@ def project_features(feats: list[RiverFeature], grid: Grid,
             parts = [gg] if gg.geom_type in ("LineString", "Polygon") else list(getattr(gg, "geoms", []))
             for p in parts:
                 if p.geom_type == "LineString" and not ft.is_area:
-                    out.append((ft.kind, p, ft.width_m))
+                    out.append((ft.kind, p, ft.width_m, ft.name))
                 elif p.geom_type == "Polygon" and ft.is_area:
-                    out.append((ft.kind, p, None))
+                    out.append((ft.kind, p, None, ft.name))
     return out
 
 
@@ -289,27 +290,69 @@ def rasterize_rivers(rivers: RiverFeatures | None, grid: Grid, cfg: ProjectConfi
         ny, nx = grid.shape
         return np.zeros((ny - 1, nx - 1), dtype=bool)
     rc = cfg.rivers
-    return rasterize_projected(rivers.projected, grid, cfg.scale, rc.min_width_mm, rc.width_scale, rc.default_width_m)
+    active = set(rc.active_classes(cfg.scale))
+    projected = [p for p in rivers.projected if p[0] in active]  # cached data may hold classes now switched off
+    return rasterize_projected(projected, grid, cfg.scale, rc.min_width_mm, rc.width_scale, rc.default_width_m,
+                               min_mm_mult=width_multipliers(projected, rc))
 
 
-def rasterize_projected(projected: list[tuple[str, object, Optional[float]]], grid: Grid, scale: float,
+def width_multipliers(projected: list[tuple], rc) -> list[float]:
+    """Per-feature factor on the printable minimum width: sqrt(river length /
+    length_ref_km), 1..max_width_mult, where a river's length is the total of
+    all its line ways sharing a name (unnamed ways count on their own).  Only
+    ``river`` lines are widened; streams, canals and areas get 1."""
+    if not rc.width_by_length:
+        return [1.0] * len(projected)
+    # group same-named river ways that actually connect (several unrelated streams
+    # share common names such as "Le Foron"), then total each group's length
+    by_name: dict[str, list[int]] = {}
+    for k, p in enumerate(projected):
+        name = p[3] if len(p) > 3 else ""
+        if p[0] == "river" and name and p[1].geom_type == "LineString":
+            by_name.setdefault(name, []).append(k)
+    length_of: dict[int, float] = {}
+    for name, idx in by_name.items():
+        blobs = unary_union([projected[k][1].buffer(60.0) for k in idx])
+        parts = list(getattr(blobs, "geoms", [blobs]))
+        totals = [0.0] * len(parts)
+        member = {}
+        for k in idx:
+            pt = projected[k][1].interpolate(0.5, normalized=True)
+            j = next((j for j, poly in enumerate(parts) if poly.intersects(pt)), 0)
+            member[k] = j
+            totals[j] += projected[k][1].length
+        for k in idx:
+            length_of[k] = totals[member[k]]
+    out = []
+    for k, p in enumerate(projected):
+        if p[0] != "river" or p[1].geom_type != "LineString":
+            out.append(1.0)
+            continue
+        length_km = length_of.get(k, p[1].length) / 1000.0
+        out.append(float(min(max(np.sqrt(length_km / rc.length_ref_km), 1.0), rc.max_width_mult)))
+    return out
+
+
+def rasterize_projected(projected: list[tuple], grid: Grid, scale: float,
                         min_width_mm: float, width_scale: float, default_width_m: dict[str, float],
-                        line_floor_cells: float = 1.05) -> np.ndarray:
-    """Cell mask from projected (kind, geometry, width_m) features: polygons as they
-    are, lines buffered to max(width, printable minimum, ~one cell)."""
+                        line_floor_cells: float = 1.05, min_mm_mult: list[float] | None = None) -> np.ndarray:
+    """Cell mask from projected (kind, geometry, width_m[, name]) features: polygons as they
+    are, lines buffered to max(width, printable minimum × per-feature multiplier, ~one cell)."""
     ny, nx = grid.shape
     empty = np.zeros((ny - 1, nx - 1), dtype=bool)
     if not projected:
         return empty
     m_per_mm = scale / 1000.0
-    floor_m = max(min_width_mm * m_per_mm, line_floor_cells * grid.pitch_m)
+    cell_floor = line_floor_cells * grid.pitch_m
     geoms = []
-    for kind, g, width in projected:
+    for k, p in enumerate(projected):
+        kind, g, width = p[0], p[1], p[2]
         if g.geom_type == "Polygon":
             geoms.append(g)
             continue
+        mult = min_mm_mult[k] if min_mm_mult is not None else 1.0
         w = (width if width is not None else default_width_m.get(kind, 10.0)) * width_scale
-        w = max(w, floor_m)
+        w = max(w, min_width_mm * mult * m_per_mm, cell_floor)
         geoms.append(g.buffer(w / 2.0, cap_style="flat", join_style="round"))
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)

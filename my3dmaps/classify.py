@@ -206,6 +206,55 @@ def cell_slope_deg(elev: np.ndarray, pitch_m: float) -> np.ndarray:
     return np.degrees(np.arctan(np.hypot(dzdx, dzdy))).astype(np.float32)
 
 
+def clean_river_cells(river: np.ndarray, water: np.ndarray, pitch_mm: float,
+                      min_gap_mm: float, min_fragment_mm2: float) -> np.ndarray:
+    """Make the blue printable.
+
+    * Gaps: land strips narrower than ``min_gap_mm`` between blue areas (two
+      parallel rivers, a river hugging a lake shore) are filled, by a
+      morphological closing of river ∪ lake/sea sized to the gap in cells.
+    * Fragments: blue components (8-connected, counting lakes/sea) smaller than
+      ``min_fragment_mm2`` are dropped.  A river mouth joined to a lake is part
+      of the lake's component, so it is never mistaken for a fragment.
+    Only river cells are added or removed; lake/sea cells are untouched.
+    """
+    blue = river | water
+    gap_cells = min_gap_mm / pitch_mm
+    r = int(np.ceil((gap_cells - 1.0) / 2.0)) if gap_cells > 1.0 else 0
+    if r > 0:
+        closed = ndimage.binary_closing(blue, structure=np.ones((3, 3), bool), iterations=r)
+        blue = blue | closed  # closing can erode at the grid border; never remove anything here
+    if min_fragment_mm2 > 0:
+        lab, n = ndimage.label(blue, structure=np.ones((3, 3), bool))
+        if n:
+            sizes = np.bincount(lab.ravel())
+            small = sizes * pitch_mm ** 2 < min_fragment_mm2
+            small[0] = False
+            blue = blue & ~small[lab]
+    return blue & ~water
+
+
+def despeckle_cells(cells: np.ndarray, editable: list[int], min_cells: float) -> np.ndarray:
+    """Repaint 8-connected components of the ``editable`` classes smaller than
+    ``min_cells`` with the nearest editable cell outside any such component."""
+    ed = np.isin(cells, editable)
+    hole = np.zeros(cells.shape, dtype=bool)
+    st = np.ones((3, 3), bool)
+    for i in editable:
+        lab, n = ndimage.label(cells == i, structure=st)
+        if n:
+            small = np.bincount(lab.ravel()) < min_cells
+            small[0] = False
+            hole |= small[lab]
+    src = ed & ~hole
+    if not hole.any() or not src.any():
+        return cells
+    _, (jj, ii) = ndimage.distance_transform_edt(~src, return_indices=True)
+    out = cells.copy()
+    out[hole] = cells[jj[hole], ii[hole]]
+    return out
+
+
 def classify(cfg: ProjectConfig, grid: Grid, elev: np.ndarray, water: Optional[WaterResult],
              rivers: Optional[RiverFeatures] = None, urban: Optional[UrbanFeatures] = None) -> Classification:
     pal: PaletteConfig = cfg.palette
@@ -282,7 +331,13 @@ def classify(cfg: ProjectConfig, grid: Grid, elev: np.ndarray, water: Optional[W
 
     # 2. skin classification per cell
     cell_elev = 0.25 * (elev[:-1, :-1] + elev[:-1, 1:] + elev[1:, :-1] + elev[1:, 1:])
-    cells = cls.slab_index(cell_elev).astype(np.int16)
+    if pal.classify_smooth_m > 0:
+        # surface colours from a smoothed DEM: SRTM roofs/trees around a threshold otherwise make camouflage
+        # patterns.  Only the skin uses it; the slab cut planes still follow the true surface under the skin.
+        cells = cls.slab_index(ndimage.gaussian_filter(cell_elev, pal.classify_smooth_m / grid.pitch_m,
+                                                       mode="nearest")).astype(np.int16)
+    else:
+        cells = cls.slab_index(cell_elev).astype(np.int16)
 
     # slope rule (promote upward only)
     for i, a in enumerate(bands):
@@ -315,6 +370,16 @@ def classify(cfg: ProjectConfig, grid: Grid, elev: np.ndarray, water: Optional[W
             target = above[0] if above else (below[-1] if below else None)
             if target is not None:
                 cells[far] = target
+
+    # despeckle: SRTM noise around a threshold leaves confetti of single colours; repaint tiny islands
+    # of an elevation band's skin with the nearest surrounding elevation band (slabs are unaffected)
+    if pal.despeckle_mm2 > 0 and len(cls.elev_band_indices) > 1:
+        cell_mm = cfg.tile_w_mm / grid.nodes_per_tile
+        cells = despeckle_cells(cells, cls.elev_band_indices, pal.despeckle_mm2 / cell_mm ** 2)
+
+    if has_rivers:
+        river_cells = clean_river_cells(river_cells, water_cells, cfg.tile_w_mm / grid.nodes_per_tile,
+                                        cfg.rivers.min_gap_mm, cfg.rivers.min_fragment_mm2)
 
     # urban overlay (never on lakes/sea); rivers are painted afterwards so they cross towns
     ui = cls.urban_index
@@ -385,7 +450,7 @@ def suggest_exaggeration(cfg: ProjectConfig, relief_m: float, target_relief_mm: 
     if relief_m <= 0:
         return 1.0
     natural = relief_m * cfg.mm_per_m
-    ex = target_relief_mm * (cfg.tile_mm / 200.0) / max(natural, 1e-6)
+    ex = target_relief_mm * (min(cfg.tile_w_mm, cfg.tile_h_mm) / 200.0) / max(natural, 1e-6)
     ex = max(1.0, min(8.0, ex))
     return cap_exaggeration(cfg, relief_m, round(ex * 4) / 4)
 

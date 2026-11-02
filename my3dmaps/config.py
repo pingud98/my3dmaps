@@ -20,33 +20,84 @@ BED_EXCLUDE = [(246.0, 0.0, 256.0, 20.0)]
 BED_CLEARANCE_MM = 0.5  # gap kept from the bed edge and the no-print zone
 
 
-def place_on_bed(footprint_mm: float) -> tuple[float, float] | None:
-    """(x, y) of a square footprint's lower-left corner on the bed: centred when
-    that clears the no-print zones, otherwise shifted the least distance that
-    does.  None if it cannot fit at all."""
-    lo, hi = BED_CLEARANCE_MM, BED_MM - BED_CLEARANCE_MM - footprint_mm
-    if hi < lo:
+def _clear_of_exclusions(x: float, y: float, w: float, h: float) -> bool:
+    return all(x + w <= ex0 - BED_CLEARANCE_MM or x >= ex1 + BED_CLEARANCE_MM
+               or y + h <= ey0 - BED_CLEARANCE_MM or y >= ey1 + BED_CLEARANCE_MM
+               for ex0, ey0, ex1, ey1 in BED_EXCLUDE)
+
+
+def _placements(w: float, h: float) -> list[tuple[float, float]]:
+    """Candidate lower-left corners for a w x h footprint: bed edges, centre, and
+    positions touching each no-print zone (0.5 mm clearance kept everywhere)."""
+    out = []
+    axes = []
+    for size in (w, h):
+        lo, hi = BED_CLEARANCE_MM, BED_MM - BED_CLEARANCE_MM - size
+        if hi < lo - 1e-9:
+            return []
+        c = {lo, hi, (BED_MM - size) / 2.0}
+        for ex0, ey0, ex1, ey1 in BED_EXCLUDE:
+            a0, a1 = (ex0, ex1) if not axes else (ey0, ey1)
+            c |= {a0 - BED_CLEARANCE_MM - size, a1 + BED_CLEARANCE_MM}
+        axes.append(sorted(v for v in c if lo - 1e-9 <= v <= hi + 1e-9))
+    for x in axes[0]:
+        for y in axes[1]:
+            if _clear_of_exclusions(x, y, w, h):
+                out.append((x, y))
+    return out
+
+
+def tower_strip(x: float, y: float, w: float, h: float) -> tuple[float, tuple[float, float, float, float]]:
+    """Widest free rectangle beside a placed footprint for a prime tower:
+    (width, (x0, y0, x1, y1)).  Strips run the full bed on the free side, minus
+    the no-print zones they would overlap (trimmed in the long direction)."""
+    gap = 2.0  # keep the tower off the tile's brim
+    lim0, lim1 = BED_CLEARANCE_MM, BED_MM - BED_CLEARANCE_MM
+    strips = [(lim0, lim0, x - gap, lim1), (x + w + gap, lim0, lim1, lim1),
+              (lim0, lim0, lim1, y - gap), (lim0, y + h + gap, lim1, lim1)]
+    best = (0.0, (0.0, 0.0, 0.0, 0.0))
+    for k, (x0, y0, x1, y1) in enumerate(strips):
+        vertical = k < 2
+        for ex0, ey0, ex1, ey1 in BED_EXCLUDE:
+            if x1 <= ex0 or x0 >= ex1 or y1 <= ey0 or y0 >= ey1:
+                continue
+            if vertical:  # trim the strip's length (y) away from the zone
+                if ey0 - y0 > y1 - ey1:
+                    y1 = min(y1, ey0 - BED_CLEARANCE_MM)
+                else:
+                    y0 = max(y0, ey1 + BED_CLEARANCE_MM)
+            else:
+                if ex0 - x0 > x1 - ex1:
+                    x1 = min(x1, ex0 - BED_CLEARANCE_MM)
+                else:
+                    x0 = max(x0, ex1 + BED_CLEARANCE_MM)
+        width = (x1 - x0) if vertical else (y1 - y0)
+        length = (y1 - y0) if vertical else (x1 - x0)
+        if length > 60.0 and width > best[0]:
+            best = (width, (x0, y0, x1, y1))
+    return best
+
+
+def place_on_bed(w: float, h: float | None = None, tower_room_mm: float = 0.0) -> tuple[float, float] | None:
+    """(x, y) of a w x h footprint's lower-left corner on the bed.
+
+    Without a tower: centred when that clears the no-print zones, otherwise
+    shifted the least distance that does.  With ``tower_room_mm`` > 0: the
+    position (among the same candidates) that leaves a free strip at least that
+    wide for the prime tower, preferring the widest strip, then the most central.
+    Falls back to the no-tower placement when no position leaves enough room.
+    None if the footprint cannot fit at all."""
+    h = w if h is None else h
+    cands = _placements(w, h)
+    if not cands:
         return None
-    centre = (BED_MM - footprint_mm) / 2.0
-
-    def clear(x: float, y: float) -> bool:
-        return all(x + footprint_mm <= ex0 - BED_CLEARANCE_MM or x >= ex1 + BED_CLEARANCE_MM
-                   or y + footprint_mm <= ey0 - BED_CLEARANCE_MM or y >= ey1 + BED_CLEARANCE_MM
-                   for ex0, ey0, ex1, ey1 in BED_EXCLUDE)
-
-    cands = {lo, hi, centre}
-    for ex0, ey0, ex1, ey1 in BED_EXCLUDE:
-        cands |= {ex0 - BED_CLEARANCE_MM - footprint_mm, ex1 + BED_CLEARANCE_MM,
-                  ey0 - BED_CLEARANCE_MM - footprint_mm, ey1 + BED_CLEARANCE_MM}
-    cands = sorted(c for c in cands if lo - 1e-9 <= c <= hi + 1e-9)
-    best = None
-    for x in cands:
-        for y in cands:
-            if clear(x, y):
-                d = abs(x - centre) + abs(y - centre)
-                if best is None or d < best[0]:
-                    best = (d, x, y)
-    return None if best is None else (best[1], best[2])
+    cx, cy = (BED_MM - w) / 2.0, (BED_MM - h) / 2.0
+    dist = lambda p: abs(p[0] - cx) + abs(p[1] - cy)  # noqa: E731
+    if tower_room_mm > 0:
+        roomy = [p for p in cands if tower_strip(p[0], p[1], w, h)[0] >= tower_room_mm]
+        if roomy:
+            return max(roomy, key=lambda p: (round(tower_strip(p[0], p[1], w, h)[0], 3), -dist(p)))
+    return min(cands, key=dist)
 
 
 def max_square_on_bed() -> float:
@@ -90,6 +141,8 @@ class BandConfig:
     max_distance_m: Optional[float] = None  # only paint within this distance of water (skin)
     slope_deg: Optional[float] = None  # also paint wherever slope >= this ...
     slope_from_m: Optional[float] = None  # ... but only above this elevation (default: band's own threshold)
+    slot: Optional[int] = None  # pin this band's colour to a physical filament slot (1-based) on every tile
+    filament: str = ""  # what is loaded for it, e.g. "PLA Matte Army Beige" (print plan only)
 
     @property
     def is_water(self) -> bool:
@@ -104,6 +157,8 @@ class PaletteConfig:
     skin_depth_mm: float = 1.2  # thickness of the surface-colored cap over the elevation slabs
     min_fraction: float = 0.003  # prune bands covering less than this fraction of the footprint
     overflow: str = "merge"  # "merge" | "swap"  (what to do with >max_slots colors)
+    classify_smooth_m: float = 0.0  # Gaussian sigma (ground metres) applied to elevations before choosing skin colours; 0 = off
+    despeckle_mm2: float = 0.0  # repaint elevation-band skin islands smaller than this (mm^2 on the print); 0 = off
     max_slots: int = 4
 
     @staticmethod
@@ -143,23 +198,42 @@ class RiversConfig:
     Widths: the OSM ``width`` tag when present, else ``default_width_m`` per
     class, times ``width_scale``; then widened to at least ``min_width_mm`` on
     the print so a 0.4 mm nozzle can lay the colour down (1.2 mm = ~3 lines).
-    Streams are only included at scales of 1:``stream_max_scale`` or larger
-    (Overpass cannot serve every Alpine stream over a 150 km box anyway).
+    Streams and canals are only included at scales of 1:``stream_max_scale`` /
+    1:``canal_max_scale`` or larger: at small scales canals are mostly drainage
+    ditches, mill races and irrigation channels running a few hundred metres
+    beside the river, which print as clutter (Martigny, 2026-09-30).
+
+    Width hierarchy (``width_by_length``): a river's printed minimum width grows
+    with the total length of the river (all OSM ways sharing its name) inside
+    the project, sqrt(length / ``length_ref_km``) times ``min_width_mm``, capped
+    at ``max_width_mult``, so the Rhône reads as the main river.
+
+    Clean-up (after rasterising): green gaps narrower than ``min_gap_mm``
+    between blue areas are filled (unprintable slivers), and isolated blue
+    fragments smaller than ``min_fragment_mm2`` are dropped.
     """
 
     enabled: bool = True
     source: str = "osm"
     classes: list[str] = field(default_factory=lambda: ["river", "canal", "stream"])
     stream_max_scale: float = 60000.0
+    canal_max_scale: float = 60000.0
     min_width_mm: float = 1.2
     width_scale: float = 1.0
     depth_mm: float = 0.6  # blue skin thickness along rivers (3 layers at 0.2 mm)
     default_width_m: dict[str, float] = field(default_factory=lambda: {"river": 30.0, "canal": 15.0, "stream": 5.0})
+    width_by_length: bool = True
+    length_ref_km: float = 15.0
+    max_width_mult: float = 2.5
+    min_gap_mm: float = 1.2
+    min_fragment_mm2: float = 5.0
 
     def active_classes(self, scale: float) -> list[str]:
         out = [c for c in self.classes if c in ("river", "canal", "stream")]
         if scale > self.stream_max_scale:
             out = [c for c in out if c != "stream"]
+        if scale > self.canal_max_scale:
+            out = [c for c in out if c != "canal"]
         return out or ["river"]
 
 
@@ -201,6 +275,37 @@ class SlicerConfig:
 
 
 @dataclass
+class OverlayConfig:
+    """Black-only SVG overlay (contours, symbols, names, grid) printed 1:1 on
+    transparent film and laid over the relief behind the frame glass.  See overlay.py.
+
+    The overlay covers the frame's visible ``window_mm`` (width, height), centred
+    on the assembled model; the model is made larger than the window so its
+    edges never show.  The map neatline sits ``margin_mm`` inside the window and
+    the border between carries grid references and the data credits."""
+
+    enabled: bool = False
+    window_mm: list[float] = field(default_factory=lambda: [300.0, 400.0])
+    margin_mm: float = 9.0  # top / left / right border
+    bottom_margin_mm: float = 15.0  # bottom border: grid numbers, title, scale bar, credits
+    grid_crs: str = "EPSG:27700"  # grid drawn on the overlay (OS National Grid)
+    grid_m: float = 1000.0
+    grid_letters: bool = True  # OS 100 km square letters (SJ, SD, ...) in the corners
+    contour_m: float = 10.0
+    index_contour_m: float = 50.0
+    contour_smooth_m: float = 75.0  # SRTM is a surface model (roofs, trees): smooth before contouring
+    contour_min_len_mm: float = 6.0  # drop tiny closed rings (noise)
+    title: str = ""
+    subtitle: str = ""
+    places: list[str] = field(default_factory=lambda: ["city", "town", "suburb", "village"])
+    symbols: list[str] = field(default_factory=lambda: ["station", "lighthouse", "peak", "airport", "stadium",
+                                                         "ferry", "railway", "motorway"])
+    font_family: str = "Helvetica, Arial, 'Liberation Sans', sans-serif"
+    line_mm: float = 0.18  # thinnest printed line (film printers manage ~0.1 mm)
+    labels: list[dict] = field(default_factory=list)  # hand-placed names: {text, e, n (grid_crs m), size, angle, italic, spacing}
+
+
+@dataclass
 class ProjectConfig:
     name: str = "untitled"
     center_lat: float = 46.35
@@ -208,11 +313,14 @@ class ProjectConfig:
     scale: float = 100000.0  # 1:scale
     tiles_x: int = 1
     tiles_y: int = 1
-    tile_mm: float = TILE_MM_DEFAULT
+    tile_mm: float = TILE_MM_DEFAULT  # tile width (east-west) on the print
+    tile_mm_y: Optional[float] = None  # tile height (north-south); None = square tiles
+    crs: str = "utm"  # model projection: "utm" (auto zone) or any projected CRS, e.g. "EPSG:27700" (OS National Grid)
+    center_xy: Optional[list[float]] = None  # grid centre in ``crs`` metres; overrides center_lat/lon (snaps grid lines)
     exaggeration: Optional[float] = None  # None -> auto-suggest from measured relief
     base_mm: float = 3.0
     max_height_mm: float = 180.0
-    pitch_mm: float = 0.5  # mesh grid pitch on the printed tile
+    pitch_mm: float = 0.25  # mesh grid pitch on the printed tile (finer than a 0.4 mm nozzle, so no visible facets)
     dem_source: str = "srtmgl1"  # "srtmgl1" | "local:<dir>"  (see dem.py, SOURCES.md)
     water: bool = True
     rivers: RiversConfig = field(default_factory=RiversConfig)
@@ -220,6 +328,7 @@ class ProjectConfig:
     shrinkage_pct: float = 0.0  # XY scale-up so the cooled print measures tile_mm (set to your filament's shrinkage, e.g. 0.3 for PLA, unless the slicer filament profile already compensates)
     palette: PaletteConfig = field(default_factory=default_palette)
     slicer: SlicerConfig = field(default_factory=SlicerConfig)
+    overlay: OverlayConfig = field(default_factory=OverlayConfig)
     monochrome: bool = False  # single-color draft print: every band gets monochrome_color -> one object per tile
     monochrome_color: str = "#c8c8c8"
     notes: str = ""
@@ -231,9 +340,31 @@ class ProjectConfig:
         return 1000.0 / self.scale
 
     @property
+    def tile_w_mm(self) -> float:
+        return float(self.tile_mm)
+
+    @property
+    def tile_h_mm(self) -> float:
+        return float(self.tile_mm if self.tile_mm_y is None else self.tile_mm_y)
+
+    @property
+    def square_tiles(self) -> bool:
+        return abs(self.tile_w_mm - self.tile_h_mm) < 1e-9
+
+    @property
     def tile_m(self) -> float:
-        """Real-world edge length of one tile in metres."""
-        return self.tile_mm * self.scale / 1000.0
+        """Real-world east-west edge length of one tile in metres."""
+        return self.tile_w_mm * self.scale / 1000.0
+
+    @property
+    def tile_h_m(self) -> float:
+        """Real-world north-south edge length of one tile in metres."""
+        return self.tile_h_mm * self.scale / 1000.0
+
+    @property
+    def model_mm(self) -> tuple[float, float]:
+        """Whole assembled model (all tiles) in mm, (width, height)."""
+        return (self.tiles_x * self.tile_w_mm, self.tiles_y * self.tile_h_mm)
 
     @property
     def pitch_m(self) -> float:
@@ -241,7 +372,20 @@ class ProjectConfig:
 
     @property
     def nodes_per_tile(self) -> int:
-        return int(round(self.tile_mm / self.pitch_mm))
+        """Grid cells along a tile's width (x)."""
+        return int(round(self.tile_w_mm / self.pitch_mm))
+
+    def nodes_y_for(self, nodes_x: int) -> int:
+        """Grid cells along a tile's height for ``nodes_x`` cells across (same pitch both ways)."""
+        return max(1, int(round(nodes_x * self.tile_h_mm / self.tile_w_mm)))
+
+    def tower_room_mm(self) -> float:
+        """Free bed width the placement must keep for a prime tower (0 = don't care)."""
+        return self.slicer.prime_tower_room_mm if self.slicer.prime_tower == "on" else 0.0
+
+    def bed_position(self) -> tuple[float, float] | None:
+        f = 1 + self.shrinkage_pct / 100.0
+        return place_on_bed(self.tile_w_mm * f, self.tile_h_mm * f, self.tower_room_mm())
 
     # ---- (de)serialisation -------------------------------------------------
     def to_dict(self) -> dict[str, Any]:
@@ -258,6 +402,8 @@ class ProjectConfig:
             d["urban"] = _pick(d["urban"], UrbanConfig)
         if "slicer" in d and isinstance(d["slicer"], dict):
             d["slicer"] = _pick(d["slicer"], SlicerConfig)
+        if "overlay" in d and isinstance(d["overlay"], dict):
+            d["overlay"] = _pick(d["overlay"], OverlayConfig)
         return _pick(d, ProjectConfig)
 
     def save(self, path: str | Path) -> None:
@@ -271,17 +417,32 @@ class ProjectConfig:
         problems = []
         if not (0.05 <= self.pitch_mm <= 5):
             problems.append("pitch_mm should be between 0.05 and 5")
-        foot = self.tile_mm * (1 + self.shrinkage_pct / 100.0)
-        if place_on_bed(foot) is None:
-            m = max_square_on_bed()
-            msg = (f"a {foot:.2f} mm tile does not fit the bed outside the printer's no-print zone "
-                   f"(largest printable square is {m:.2f} mm)")
-            if self.shrinkage_pct > 0 and self.tile_mm <= m:
-                # a 245 mm tile already uses the whole bed, so compensation has to come out of the nominal size
-                msg += (f"; shrinkage compensation needs room: use shrinkage_pct <= "
-                        f"{max(0.0, (m / self.tile_mm - 1) * 100):.2f} or tile_mm <= "
-                        f"{m / (1 + self.shrinkage_pct / 100.0):.2f}")
+        f = 1 + self.shrinkage_pct / 100.0
+        fw, fh = self.tile_w_mm * f, self.tile_h_mm * f
+        if place_on_bed(fw, fh) is None:
+            if self.square_tiles:
+                m = max_square_on_bed()
+                msg = (f"a {fw:.2f} mm tile does not fit the bed outside the printer's no-print zone "
+                       f"(largest printable square is {m:.2f} mm)")
+                if self.shrinkage_pct > 0 and self.tile_mm <= m:
+                    # a 245 mm tile already uses the whole bed, so compensation has to come out of the nominal size
+                    msg += (f"; shrinkage compensation needs room: use shrinkage_pct <= "
+                            f"{max(0.0, (m / self.tile_mm - 1) * 100):.2f} or tile_mm <= "
+                            f"{m / f:.2f}")
+            else:
+                msg = f"a {fw:.2f} x {fh:.2f} mm tile does not fit the bed outside the printer's no-print zone"
             problems.append(msg)
+        elif self.slicer.prime_tower == "on":
+            p = self.bed_position()
+            room = tower_strip(p[0], p[1], fw, fh)[0]
+            if room < self.slicer.prime_tower_room_mm:
+                problems.append(f"slicer.prime_tower is 'on' but a {fw:.1f} x {fh:.1f} mm tile leaves at most "
+                                f"{room:.1f} mm of bed for it (needs prime_tower_room_mm = "
+                                f"{self.slicer.prime_tower_room_mm:.0f}); use smaller tiles or prime_tower 'auto'")
+        if self.tile_mm_y is not None and not (20 <= self.tile_mm_y <= BED_MM):
+            problems.append("tile_mm_y should be between 20 and 256 mm")
+        if self.center_xy is not None and (self.crs == "utm" or len(self.center_xy) != 2):
+            problems.append("center_xy needs an explicit projected crs (e.g. EPSG:27700) and two numbers")
         if not (-2.0 <= self.shrinkage_pct <= 5.0):
             problems.append("shrinkage_pct should be a small percentage (e.g. 0.3)")
         if self.rivers.enabled and self.rivers.depth_mm > self.palette.skin_depth_mm:
