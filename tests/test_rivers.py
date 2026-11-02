@@ -193,3 +193,62 @@ def test_build_fails_loudly_when_rivers_cannot_be_fetched(monkeypatch, tmp_path,
     monkeypatch.setattr(P, "prepare_terrain", lambda *a, **k: Terrain(grid, elev, elev, water, {}, broken))
     with pytest.raises(RuntimeError, match="--no-rivers"):
         P.build_project(cfg, tmp_path)
+
+
+# --- continuity (user report 2026-11-02: Liverpool brooks printed as dashes, Ship Canal merged into the Mersey)
+
+def _hline(grid, x0, x1, j):
+    y = grid.northing[j] + 0.5 * grid.pitch_m
+    return LineString([(grid.easting[0] + x0, y), (grid.easting[0] + x1, y)])
+
+
+def test_bridge_culverts_short_or_between_visible_stretches(synth):
+    from my3dmaps.rivers import bridge_culverts
+
+    cfg, grid, elev, water = synth
+    vis = [("stream", _hline(grid, 1000, 3000, 20), None, "a"), ("stream", _hline(grid, 6000, 8000, 20), None, "a")]
+    between = ("stream", _hline(grid, 3000, 6000, 20), None, "a")  # 3 km, both ends visible
+    dangling = ("stream", _hline(grid, 3000, 6000, 40), None, "b")  # 3 km, ends in town
+    short = ("stream", _hline(grid, 3000, 3200, 60), None, "c")  # 200 m road crossing
+    got = bridge_culverts(vis, [between, dangling, short], grid, 300.0, True)
+    assert between in got and short in got and dangling not in got
+    assert bridge_culverts(vis, [between], grid, 300.0, False) == []
+
+
+def test_join_gaps_connects_dangling_downstream_end(synth):
+    from my3dmaps.rivers import join_gaps
+
+    cfg, grid, elev, water = synth
+    y = grid.northing[30]
+    x = grid.easting[0] + 5000
+    main = ("river", LineString([(x, y - 3000), (x, y + 3000)]), None, "main")
+    trib = ("stream", LineString([(x - 3000, y), (x - 250, y)]), None, "")  # stops 250 m short
+    got = join_gaps([main, trib], grid, 300.0)
+    assert len(got) == 1 and abs(got[0][1].length - 250) < 1
+    assert join_gaps([main, trib], grid, 200.0) == []
+    # the main river's own (upstream-to-downstream) ends do not touch anything else either: none added there
+    assert all(g[1].coords[0][0] < x for g in got)
+
+
+def test_canal_beside_sea_keeps_a_land_bank(synth):
+    from my3dmaps.water import WaterResult
+
+    cfg, grid, elev, _ = synth
+    ny, nx = grid.shape
+    elev = np.full((ny, nx), 5.0)
+    mask = np.zeros((ny, nx), bool)
+    mask[:50] = True  # sea in the south; water cells are rows 0..48
+    elev[mask] = 0.0
+    water = WaterResult(mask, np.where(mask, 0.0, np.nan).astype(np.float32), [], 0.0)
+    canal = ("canal", _hline(grid, 500, 15000, 48), None, "Ship Canal")
+    rivers = RiverFeatures([], [canal])
+    cfg.rivers.canal_bank_mm = 0.0
+    merged = classify(cfg, grid, elev, water, rivers)
+    assert not merged.river_cells[48, 10:140].any()  # canal swallowed by the sea
+    cfg.rivers.canal_bank_mm = 1.2
+    cls = classify(cfg, grid, elev, water, rivers)
+    assert cls.river_cells[48, 10:140].all()  # canal is drawn as river
+    wi = cls.water_index
+    assert (cls.cells[47, 10:140] != wi).all()  # a land bank between canal and sea
+    assert (cls.cells[45, 10:140] == wi).all()  # sea beyond it is untouched
+    assert cls.canal_bank_cells[47, 10:140].all()

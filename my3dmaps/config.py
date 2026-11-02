@@ -211,6 +211,12 @@ class RiversConfig:
     Clean-up (after rasterising): green gaps narrower than ``min_gap_mm``
     between blue areas are filled (unprintable slivers), and isolated blue
     fragments smaller than ``min_fragment_mm2`` are dropped.
+
+    Culverts and tunnels are hidden, except chains no longer than
+    ``culvert_bridge_m`` and (``culvert_join``) chains whose every end meets
+    visible water, so brooks don't print as dashes.  ``canal_bank_mm`` keeps
+    a land strip between a canal and an adjacent lake/sea (the Manchester Ship
+    Canal runs along the Mersey shore at Eastham).
     """
 
     enabled: bool = True
@@ -227,6 +233,13 @@ class RiversConfig:
     max_width_mult: float = 2.5
     min_gap_mm: float = 1.2
     min_fragment_mm2: float = 5.0
+    # culverts / tunnels (2026-11-02): drawn when short or when they join two visible stretches
+    culvert_bridge_m: float = 300.0
+    culvert_join: bool = True
+    # holes in the OSM data: join a dangling downstream end to a waterway this close (0 = off)
+    gap_join_m: float = 0.0
+    # canals running beside a lake/sea get a land bank this wide so they don't merge into it (0 = off)
+    canal_bank_mm: float = 0.0
 
     def active_classes(self, scale: float) -> list[str]:
         out = [c for c in self.classes if c in ("river", "canal", "stream")]

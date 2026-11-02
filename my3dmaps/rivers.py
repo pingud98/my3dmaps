@@ -32,6 +32,7 @@ import requests
 import shapely
 from pyproj import Transformer
 from shapely.geometry import LineString, MultiPolygon, Polygon, box
+import shapely.ops
 from shapely.ops import polygonize, unary_union
 
 from .config import ProjectConfig, RiversConfig
@@ -114,6 +115,7 @@ class RiverFeature:
     width_m: Optional[float]  # from the OSM width tag, else None
     name: str = ""
     osm_id: int = 0
+    underground: bool = False  # tunnel / culvert / covered: only used to bridge gaps (see bridge_culverts)
 
     @property
     def is_area(self) -> bool:
@@ -129,6 +131,8 @@ class RiverFeatures:
     projected: list[tuple] = field(default_factory=list)
     source: str = "osm"
     error: str = ""
+    # underground line ways (culverts, tunnels), projected like ``projected``; not drawn unless bridged
+    culverts: list[tuple] = field(default_factory=list)
 
     @property
     def count(self) -> int:
@@ -171,13 +175,16 @@ def _ring(coords: list[dict]) -> list[tuple[float, float]]:
     return [(c["lon"], c["lat"]) for c in coords]
 
 
-def parse_elements(elements: list[dict]) -> list[RiverFeature]:
+def parse_elements(elements: list[dict], include_underground: bool = False) -> list[RiverFeature]:
+    """OSM elements -> features.  Underground ways are skipped, or with
+    ``include_underground`` returned (lines only) flagged ``underground``."""
     feats: list[RiverFeature] = []
     for e in elements:
         tags = e.get("tags", {}) or {}
-        if _underground(tags):
-            continue
         ww = tags.get("waterway", "")
+        und = _underground(tags)
+        if und and not (include_underground and e["type"] == "way" and ww in LINE_CLASSES):
+            continue
         water = tags.get("water", "")
         is_area_tag = (tags.get("natural") == "water" and water in AREA_WATER) or ww == "riverbank"
         kind = ww if ww in LINE_CLASSES else (water if water in AREA_WATER else "river")
@@ -187,7 +194,7 @@ def parse_elements(elements: list[dict]) -> list[RiverFeature]:
             pts = _ring(e.get("geometry") or [])
             if len(pts) < 2:
                 continue
-            if is_area_tag and len(pts) >= 4 and pts[0] == pts[-1]:
+            if is_area_tag and not und and len(pts) >= 4 and pts[0] == pts[-1]:
                 g = Polygon(pts)
                 if not g.is_valid:
                     g = shapely.make_valid(g)
@@ -195,7 +202,7 @@ def parse_elements(elements: list[dict]) -> list[RiverFeature]:
                     feats.append(RiverFeature(kind, g, None, name, e["id"]))
                 continue
             if ww in LINE_CLASSES:
-                feats.append(RiverFeature(kind, LineString(pts), width, name, e["id"]))
+                feats.append(RiverFeature(kind, LineString(pts), width, name, e["id"], und))
         elif e["type"] == "relation" and is_area_tag:
             outers, inners = [], []
             for m in e.get("members", []):
@@ -266,11 +273,13 @@ def load_rivers(cfg: ProjectConfig, grid: Grid, progress: Callable[[str], None] 
     bbox = grid.bbox_lonlat()
     try:
         data = fetch_osm(bbox, classes, progress)
-        feats = parse_elements(data.get("elements", []))
+        allf = parse_elements(data.get("elements", []), include_underground=True)
+        feats = [f for f in allf if not f.underground]
         proj = project_features(feats, grid, bbox)
+        culv = project_features([f for f in allf if f.underground], grid, bbox)
         if progress:
-            progress(f"{len(proj)} river/canal features on the grid")
-        return RiverFeatures(feats, proj, "osm")
+            progress(f"{len(proj)} river/canal features on the grid ({len(culv)} culverts/tunnels)")
+        return RiverFeatures(feats, proj, "osm", culverts=culv)
     except Exception as e:  # noqa: BLE001
         log.warning("rivers unavailable: %s", e)
         if progress:
@@ -278,13 +287,18 @@ def load_rivers(cfg: ProjectConfig, grid: Grid, progress: Callable[[str], None] 
         return RiverFeatures([], [], "osm", str(e))
 
 
-def rasterize_rivers(rivers: RiverFeatures | None, grid: Grid, cfg: ProjectConfig) -> np.ndarray:
+def rasterize_rivers(rivers: RiverFeatures | None, grid: Grid, cfg: ProjectConfig,
+                     is_water: Callable[[float, float], bool] | None = None,
+                     kinds: set[str] | None = None) -> np.ndarray:
     """Boolean cell mask [ny-1, nx-1]: cells whose centre lies in a river.
 
     Line features are buffered to their printed width: the OSM width (or the
     per-class default), times ``width_scale``, but never narrower than
     ``min_width_mm`` on the print or than about one grid cell, so a river is
-    always at least one cell wide at any preview/print resolution.
+    always at least one cell wide at any preview/print resolution.  Culverts
+    and tunnels are drawn where ``bridge_culverts`` says they close a gap
+    (``is_water(x, y)`` tells it where lakes/sea are).  ``kinds`` restricts
+    the mask to some classes (e.g. canals only).
     """
     if rivers is None or not rivers.projected:
         ny, nx = grid.shape
@@ -292,8 +306,121 @@ def rasterize_rivers(rivers: RiverFeatures | None, grid: Grid, cfg: ProjectConfi
     rc = cfg.rivers
     active = set(rc.active_classes(cfg.scale))
     projected = [p for p in rivers.projected if p[0] in active]  # cached data may hold classes now switched off
+    if rc.culvert_bridge_m > 0 or rc.culvert_join:
+        culv = [p for p in getattr(rivers, "culverts", []) if p[0] in active]
+        projected = projected + bridge_culverts(projected, culv, grid, rc.culvert_bridge_m, rc.culvert_join, is_water)
+    if rc.gap_join_m > 0:
+        projected = projected + join_gaps(projected, grid, rc.gap_join_m, is_water)
+    mult = width_multipliers(projected, rc)
+    if kinds is not None:
+        keep = [k for k, p in enumerate(projected) if p[0] in kinds]
+        projected, mult = [projected[k] for k in keep], [mult[k] for k in keep]
     return rasterize_projected(projected, grid, cfg.scale, rc.min_width_mm, rc.width_scale, rc.default_width_m,
-                               min_mm_mult=width_multipliers(projected, rc))
+                               min_mm_mult=mult)
+
+
+def join_gaps(projected: list[tuple], grid: Grid, max_m: float,
+              is_water: Callable[[float, float], bool] | None = None) -> list[tuple]:
+    """Straight connectors for holes in the OSM data.
+
+    OSM waterways are drawn in flow direction, so a line's last point is its
+    downstream end.  When that end touches no other waterway, lake/sea or the
+    model edge, and another waterway passes within ``max_m``, a connector is
+    added to the nearest point on it (Clatter Brook, Wirral: the mapped line
+    stops 250 m short of its continuation).
+    """
+    lines = [(k, p) for k, p in enumerate(projected) if p[1].geom_type == "LineString" and p[1].length > 0]
+    if not lines:
+        return []
+    geoms = [p[1] for p in projected]
+    tree = shapely.STRtree(geoms)
+    tol = max(2.0, 0.25 * grid.pitch_m)
+    e0, e1 = float(grid.easting[0]), float(grid.easting[-1])
+    n0, n1 = float(grid.northing[0]), float(grid.northing[-1])
+    edge = 2.0 * grid.pitch_m
+    out: list[tuple] = []
+    for k, p in lines:
+        x, y = p[1].coords[-1][:2]
+        if x < e0 + edge or x > e1 - edge or y < n0 + edge or y > n1 - edge:
+            continue
+        if is_water is not None and is_water(x, y):
+            continue
+        end = shapely.Point(x, y)
+        near = [int(j) for j in tree.query(end, predicate="dwithin", distance=max_m) if int(j) != k]
+        if not near:
+            continue
+        dists = [geoms[j].distance(end) for j in near]
+        if min(dists) <= tol:
+            continue  # already joined
+        j = near[int(np.argmin(dists))]
+        q = shapely.ops.nearest_points(geoms[j], end)[0]
+        out.append((p[0], LineString([(x, y), (q.x, q.y)]), p[2], p[3] if len(p) > 3 else ""))
+    return out
+
+
+def bridge_culverts(visible: list[tuple], culverts: list[tuple], grid: Grid, max_m: float, join: bool,
+                    is_water: Callable[[float, float], bool] | None = None) -> list[tuple]:
+    """Culvert/tunnel ways worth drawing so a watercourse reads as continuous.
+
+    Underground ways are grouped into chains (ways that touch).  A chain is
+    drawn when its total length is at most ``max_m`` (road and rail crossings),
+    or, with ``join``, when every loose end of the chain meets a visible
+    waterway, a lake/sea cell or the model edge - i.e. it is a hidden stretch
+    *between* two visible ones, however long.  Chains with a loose end in the
+    middle of town (a brook that is culverted all the way to its outfall) stay
+    hidden.  User report 2026-11-02: Liverpool/Wirral brooks printed as dashes.
+    """
+    lines = [c for c in culverts if c[1].geom_type == "LineString" and c[1].length > 0]
+    if not lines:
+        return []
+    tol = max(2.0, 0.25 * grid.pitch_m)
+    geoms = [c[1] for c in lines]
+    parent = list(range(len(lines)))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    ctree = shapely.STRtree(geoms)
+    for i, g in enumerate(geoms):
+        for j in ctree.query(g, predicate="dwithin", distance=tol):
+            if j != i:
+                parent[find(int(j))] = find(i)
+    chains: dict[int, list[int]] = {}
+    for i in range(len(lines)):
+        chains.setdefault(find(i), []).append(i)
+
+    vis = [p[1] for p in visible]
+    vtree = shapely.STRtree(vis) if vis else None
+    e0, e1 = float(grid.easting[0]), float(grid.easting[-1])
+    n0, n1 = float(grid.northing[0]), float(grid.northing[-1])
+    edge = 2.0 * grid.pitch_m
+
+    def connected(x: float, y: float) -> bool:
+        if x < e0 + edge or x > e1 - edge or y < n0 + edge or y > n1 - edge:
+            return True
+        if vtree is not None and len(vtree.query(shapely.Point(x, y), predicate="dwithin", distance=tol)):
+            return True
+        return bool(is_water is not None and is_water(x, y))
+
+    out: list[tuple] = []
+    for idx in chains.values():
+        total = sum(geoms[k].length for k in idx)
+        ok = total <= max_m
+        if not ok and join:
+            ends = []
+            for k in idx:
+                cs = geoms[k].coords
+                for pt in (cs[0], cs[-1]):
+                    p = shapely.Point(pt)
+                    if not any(m != k and geoms[m].distance(p) <= tol for m in idx):
+                        ends.append(pt)
+            ok = bool(ends) and all(connected(x, y) for x, y in ends)
+        if ok:
+            out.extend(lines[k] for k in idx)
+    return out
 
 
 def width_multipliers(projected: list[tuple], rc) -> list[float]:

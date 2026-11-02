@@ -70,6 +70,7 @@ class Classification:
     river_cells: Optional[np.ndarray] = None  # bool [ny-1, nx-1]: cells painted as river (thin water skin)
     rivers_info: Optional[dict] = None
     urban_cells: Optional[np.ndarray] = None  # bool [ny-1, nx-1]: cells painted urban (thin grey skin)
+    canal_bank_cells: Optional[np.ndarray] = None  # bool: lake/sea cells kept as land beside a canal
     urban_info: Optional[dict] = None
 
     # ---- elevation-band helpers -------------------------------------------
@@ -260,9 +261,16 @@ def classify(cfg: ProjectConfig, grid: Grid, elev: np.ndarray, water: Optional[W
     pal: PaletteConfig = cfg.palette
     ny, nx = elev.shape
     has_water = water is not None and water.any
+    water_mask = water.mask if has_water else np.zeros_like(elev, dtype=bool)
+
+    def is_water(x: float, y: float) -> bool:  # node lookup, for culverts ending at a lake/sea
+        i = int(np.clip(round((x - grid.easting[0]) / grid.pitch_m), 0, nx - 1))
+        j = int(np.clip(round((y - grid.northing[0]) / grid.pitch_m), 0, ny - 1))
+        return bool(water_mask[j, i])
+
     river_cells = None
     if cfg.rivers.enabled and rivers is not None and rivers.count:
-        river_cells = rasterize_rivers(rivers, grid, cfg)
+        river_cells = rasterize_rivers(rivers, grid, cfg, is_water)
         if not river_cells.any():
             river_cells = None
     has_rivers = river_cells is not None
@@ -272,7 +280,6 @@ def classify(cfg: ProjectConfig, grid: Grid, elev: np.ndarray, water: Optional[W
         if not urban_cells.any():
             urban_cells = None
     has_urban = urban_cells is not None
-    water_mask = water.mask if has_water else np.zeros_like(elev, dtype=bool)
     ref_water = water.reference_level_m if has_water else None
     pruned: list[dict] = []
 
@@ -350,6 +357,22 @@ def classify(cfg: ProjectConfig, grid: Grid, elev: np.ndarray, water: Optional[W
     # water surfaces
     wcount = (water_mask[:-1, :-1].astype(np.int8) + water_mask[:-1, 1:] + water_mask[1:, :-1] + water_mask[1:, 1:])
     water_cells = wcount >= 4  # all four corners: the blue skin must never climb a shore
+    # canal banks: a canal beside a lake/sea (Manchester Ship Canal along the Mersey) would merge into
+    # it, because SRTM puts its embankment at water level.  Canal cells become river cells and a land
+    # strip ``canal_bank_mm`` wide is kept between them and the open water (painted by elevation band).
+    bank = None
+    if has_rivers and cfg.rivers.canal_bank_mm > 0 and water_cells.any():
+        canal = rasterize_rivers(rivers, grid, cfg, is_water, kinds={"canal"})
+        cell_mm = cfg.tile_w_mm / grid.nodes_per_tile
+        bank_cells = cfg.rivers.canal_bank_mm / cell_mm + 0.5
+        # a canal route continuing across open water (Leeds & Liverpool Canal from Brunswick out into
+        # the Mersey) stays open water: only canal cells near the real shore count
+        canal &= ndimage.distance_transform_edt(water_cells) <= bank_cells
+        if canal.any():
+            d = ndimage.distance_transform_edt(~canal)
+            bank = (d > 0) & (d <= bank_cells) & ~river_cells
+            cls.canal_bank_cells = bank & water_cells
+            water_cells = water_cells & ~canal & ~bank
     wi = cls.water_index
     if wi is not None:
         cells[water_cells] = wi
@@ -378,8 +401,11 @@ def classify(cfg: ProjectConfig, grid: Grid, elev: np.ndarray, water: Optional[W
         cells = despeckle_cells(cells, cls.elev_band_indices, pal.despeckle_mm2 / cell_mm ** 2)
 
     if has_rivers:
+        raw = river_cells
         river_cells = clean_river_cells(river_cells, water_cells, cfg.tile_w_mm / grid.nodes_per_tile,
                                         cfg.rivers.min_gap_mm, cfg.rivers.min_fragment_mm2)
+        if bank is not None:
+            river_cells &= ~(bank & ~raw)  # gap filling must not close a canal bank again
 
     # urban overlay (never on lakes/sea); rivers are painted afterwards so they cross towns
     ui = cls.urban_index

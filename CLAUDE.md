@@ -299,6 +299,25 @@ Decisions made while implementing (these refine the sections above):
   camouflage patterns at the 8 m threshold, so skin colours now come from a
   DEM smoothed by `palette.classify_smooth_m` (60 m) and islands under
   `palette.despeckle_mm2` (3 mm²) are repainted; slabs are unaffected.
+- **River continuity (user report 2026-11-02, first Liverpool G-code):** the
+  Wirral and Liverpool brooks printed as dashes and the Manchester Ship Canal
+  merged into the Mersey.  Causes and fixes (`rivers.*`, Liverpool preset
+  values in brackets): (1) culverts/tunnels were all skipped; they are now
+  kept aside and drawn when a chain of them is ≤ `culvert_bridge_m` (300 m,
+  road/rail crossings) or, with `culvert_join`, when every loose end meets a
+  visible waterway, lake/sea or the model edge (the River Alt's 1.9 km
+  culvert); a brook culverted all the way to its outfall stays hidden.
+  (2) Holes in the OSM data (Clatter Brook stops 250 m short): a dangling
+  *downstream* end (OSM draws waterways in flow direction) is joined to the
+  nearest waterway within `gap_join_m` (300; default 0 = off).  (3)
+  `min_gap_mm` 0.5 (≈ one extrusion line, instead of 1.2) so confluences and
+  double-mapped streams no longer fill into blue wedges; `min_fragment_mm2`
+  12 drops orphan dashes.  (4) `canal_bank_mm` (1.2; default 0): SRTM puts
+  the Ship Canal's embankment at sea level, so canal cells near the shore are
+  taken out of the sea mask and a land strip that wide is kept between canal
+  and open water (painted by elevation band = beige); canal routes crossing
+  open water (Leeds & Liverpool Canal out of Brunswick Dock) are left as
+  water so they don't become piers.
 - **Prime tower (2026-11-02, reverses the 245 mm "auto" outcome for this
   preset):** `slicer.prime_tower: "on"` makes `place_on_bed` choose a bed
   position that leaves a ≥ `prime_tower_room_mm` (35) strip — a 175 × 225 tile

@@ -35,7 +35,13 @@
       "river": 30,
       "canal": 15,
       "stream": 5
-    }
+    },
+    "min_gap_mm": 0.5,
+    "min_fragment_mm2": 12,
+    "culvert_bridge_m": 300,
+    "culvert_join": true,
+    "gap_join_m": 300,
+    "canal_bank_mm": 1.2
   },
   "urban": {
     "enabled": false,
