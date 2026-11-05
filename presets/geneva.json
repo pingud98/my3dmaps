@@ -1,6 +1,6 @@
 {
   "name": "geneva-montblanc",
-  "notes": "Lake Geneva basin to the Mont Blanc massif for an IKEA SANNAHED 50 x 50 cm box frame (6 cm deep). The frame's visible window is a little under 50 cm (about 47.4 cm scaled off IKEA's drawing), so the relief is 47.5 x 47.5 cm (user decision 2026-11-05): 2x2 tiles of 237.5 mm at 1:200,000 = 47.5 km per tile. Projected on ETRS89 / UTM zone 32N (EPSG:25832), the European reference grid, so the overlay's 10 km grid (MGRS square letters) is straight. Bands: water, two vegetation tiers, rock, snow. No shore band (dropped 2026-09-28). 5 colours on 4 slots: palette.overflow='swap' plans one manual swap (lowland -> snow) on the Mont Blanc tile. Exaggeration fixed at 2.0x (tallest tile ~49 mm, fits the 6 cm frame). Filaments (2026-11-05, user's spools): slot 1 glossy blue (water+base), 2 matte army dark green (lowland), 3 matte grey (rock), 4 matte wood brown (upland); white swapped into slot 2 for snow.",
+  "notes": "Lake Geneva basin to the Mont Blanc massif for an IKEA SANNAHED 50 x 50 cm box frame. The inside of the frame is ~489 x 489 mm and ~45 mm deep (measured off a 3 x 3 shelf insert made for it: 162.98 mm modules, 44 mm deep), so the relief is 488.5 x 488.5 mm (user decision 2026-11-05: fills the interior with the tiniest margin) and at most 44 mm tall: 2x2 tiles of 244.25 mm at 1:200,000 = 48.85 km per tile; exaggeration 2.0x requested, capped by max_height_mm 44 (~1.79x). Projected on ETRS89 / UTM zone 32N (EPSG:25832), the European reference grid, so the overlay's 10 km grid (MGRS square letters) is straight. Bands: water, two vegetation tiers, rock, snow; no shore band. 5 colours on 4 slots: one manual swap (lowland -> snow) on the Mont Blanc tile, printed last. Filaments (user's spools): slot 1 glossy blue (water+base), 2 matte army dark green (lowland), 3 matte grey (rock), 4 matte wood brown (upland); white swapped into slot 2 for snow.",
   "center_lat": 46.18,
   "center_lon": 6.55,
   "crs": "EPSG:25832",
@@ -11,10 +11,10 @@
   "scale": 200000,
   "tiles_x": 2,
   "tiles_y": 2,
-  "tile_mm": 237.5,
+  "tile_mm": 244.25,
   "exaggeration": 2.0,
   "base_mm": 3.0,
-  "max_height_mm": 180,
+  "max_height_mm": 44,
   "pitch_mm": 0.25,
   "dem_source": "srtmgl1",
   "water": true,
@@ -126,8 +126,8 @@
   "overlay": {
     "enabled": true,
     "window_mm": [
-      475,
-      475
+      488.5,
+      488.5
     ],
     "margin_mm": 9.0,
     "bottom_margin_mm": 15.0,

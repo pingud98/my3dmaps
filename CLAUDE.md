@@ -19,7 +19,7 @@ Coding is being done by Fable against this spec. Keep this file the single sourc
 
 ## Tiling
 
-Models are built in **245 × 245 mm modules** (the Alps set later shrank to 237.5 mm, see decisions) (footprint; decision 2026-09-28, originally 200 mm) so that 2 × 2 tiles fill a 50 × 50 cm IKEA frame with a 5 mm border. The user asked for 250 mm, but the CC2's OrcaSlicer profile excludes x 246–256, y 0–20 on the 256 × 256 bed, so 245 mm (placed at x 0.5) is the largest printable square; 3 × 3 of 167 mm and 2 × 3 of 250 × 167 mm were offered and declined. Reasons for tiling:
+Models are built in **245 × 245 mm modules** (the Alps set later became 244.25 mm for the SANNAHED frame, see decisions) (footprint; decision 2026-09-28, originally 200 mm) so that 2 × 2 tiles fill a 50 × 50 cm IKEA frame with a 5 mm border. The user asked for 250 mm, but the CC2's OrcaSlicer profile excludes x 246–256, y 0–20 on the 256 × 256 bed, so 245 mm (placed at x 0.5) is the largest printable square; 3 × 3 of 167 mm and 2 × 3 of 250 × 167 mm were offered and declined. Reasons for tiling:
 - Fits the bed with margin.
 - Lets a long/thin region (e.g. a lake shoreline, a valley) be printed as a strip of tiles rather than one oversized model.
 - Lets a larger area (e.g. full Geneva-to-Mont-Blanc transect) be assembled from a 2×2 or 3×3 (etc.) grid of tiles.
@@ -217,7 +217,8 @@ Decisions made while implementing (these refine the sections above):
   1–8× and to `max_height_mm` (180).  Geneva 1:200k would auto-pick 2.5×
   (60 mm tall) but the preset fixes **2.0× (≈49 mm)** so it fits the user's
   6 cm deep frame under glass (decision 2026-09-28; the user may deepen the
-  frame back if needed).  Liverpool 1:50k → 8× (22 mm).
+  frame back if needed; superseded 2026-11-05: capped at 44 mm ≈ 1.78× for
+  the SANNAHED frame's ~45 mm inside depth).  Liverpool 1:50k → 8× (22 mm).
 - **Pruning/merging:** bands with no area above their threshold, or covering
   <0.3 % of the footprint, are dropped (Liverpool loses rock & snow).  With
   more colours than slots, `overflow: "merge"` merges the adjacent pair with
@@ -333,20 +334,23 @@ Decisions made while implementing (these refine the sections above):
   Masks (not white ink) keep the film clear under labels.  Long-distance ferry
   routes are dropped (they only trace the shipping channel).  Contour tracing
   is a small marching-squares in numpy (no skimage in the venv).
-- **Alps print set (2026-11-05, after the Liverpool tiles were printed):**
-  `presets/geneva.json` → `out/alps/`.  Frame is an IKEA SANNAHED 50 × 50 cm
-  box frame (6 cm deep) whose visible window is a little under 50 cm (~47.4 cm
-  scaled off IKEA's drawing), so the relief is **47.5 × 47.5 cm** (user
-  decision; 46.5 was the fallback): 2 × 2 tiles of 237.5 mm at 1:200,000,
-  2.0×, ≤ 49 mm.  Projected on **ETRS89 / UTM 32N (EPSG:25832)**, the
-  European reference grid (the user asked for a European datum, not OS), with
-  `center_xy` (311000, 5117000).  Filaments are the user's spools, pinned:
-  1 glossy blue (water+base), 2 matte army dark green (lowland), 3 matte grey
-  (rock), 4 matte wood brown (upland); white is swapped into slot 2 for snow
-  on the Mont Blanc tile only (printed last).  Changes made for it:
-  (1) `classify_smooth_m` 60 / `despeckle_mm2` 3 as for Liverpool;
-  (2) `tile.build_tile`: an elevation band whose slab covers less than
-  `despeckle_mm2` on a tile and has no skin there takes the band below's
+- **Alps print set (2026-11-05, after the Liverpool tiles were printed;
+  git tag `alps-sannahed-50x50`):** `presets/geneva.json` → `out/alps/`.
+  Frame is an IKEA SANNAHED 50 × 50 cm box frame.  Its inside, measured off a
+  3 × 3 shelf insert made for it (162.98 mm modules, 44 mm deep), is ~489 mm
+  square and ~45 mm deep, so (user decision) the relief is **488.5 × 488.5 mm,
+  ≤ 44 mm tall**: 2 × 2 tiles of 244.25 mm at 1:200,000; the preset asks for
+  2.0× and `max_height_mm` 44 caps it (~1.78×).  (A 47.5 cm version sized to
+  the visible window was built first and dropped: the relief fills the
+  interior and the lip hides its edge.)  Projected on **ETRS89 / UTM 32N
+  (EPSG:25832)**, the European reference grid (the user asked for a European
+  datum, not OS), `center_xy` (311000, 5117000).  Filaments are the user's
+  spools, pinned: 1 glossy blue (water+base), 2 matte army dark green
+  (lowland), 3 matte grey (rock), 4 matte wood brown (upland); white is
+  swapped into slot 2 for snow on the Mont Blanc tile only (printed last).
+  Changes made for it: (1) `classify_smooth_m` 60 / `despeckle_mm2` 3 as for
+  Liverpool; (2) `tile.build_tile`: an elevation band whose slab covers less
+  than `despeckle_mm2` on a tile and has no skin there takes the band below's
   colour (a 42-triangle snow cap on tile x1_y1 had cost a manual swap);
   (3) slot pinning now also applies to tiles with manual swaps when every
   starting colour is pinned (planner slots are renumbered; swapped-in colours
