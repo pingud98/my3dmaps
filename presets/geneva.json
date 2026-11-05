@@ -1,12 +1,17 @@
 {
   "name": "geneva-montblanc",
-  "notes": "Lake Geneva basin (Geneva at the west end) to the Mont Blanc massif, sized for a 50 x 50 cm frame: 2x2 tiles of 245 mm at 1:200,000 = 49 km per tile, 98 x 98 km total. Bands: water, two vegetation tiers, rock, snow. No shore band (dropped 2026-09-28: at this scale it is a 1-2 mm rim that cost most of the manual swaps). 5 colours on 4 slots: palette.overflow='swap' plans a manual swap on tiles that reach the snowline; set 'merge' to auto-merge the two least distinct bands instead. Exaggeration fixed at 2.0x (2026-09-28) so the tallest tile is ~49 mm and fits a 6 cm deep frame under glass; auto would pick 2.5x (60 mm).",
+  "notes": "Lake Geneva basin to the Mont Blanc massif for an IKEA SANNAHED 50 x 50 cm box frame (6 cm deep). The frame's visible window is a little under 50 cm (about 47.4 cm scaled off IKEA's drawing), so the relief is 47.5 x 47.5 cm (user decision 2026-11-05): 2x2 tiles of 237.5 mm at 1:200,000 = 47.5 km per tile. Projected on ETRS89 / UTM zone 32N (EPSG:25832), the European reference grid, so the overlay's 10 km grid (MGRS square letters) is straight. Bands: water, two vegetation tiers, rock, snow. No shore band (dropped 2026-09-28). 5 colours on 4 slots: palette.overflow='swap' plans one manual swap (lowland -> snow) on the Mont Blanc tile. Exaggeration fixed at 2.0x (tallest tile ~49 mm, fits the 6 cm frame). Filaments (2026-11-05, user's spools): slot 1 glossy blue (water+base), 2 matte army dark green (lowland), 3 matte grey (rock), 4 matte wood brown (upland); white swapped into slot 2 for snow.",
   "center_lat": 46.18,
   "center_lon": 6.55,
+  "crs": "EPSG:25832",
+  "center_xy": [
+    311000,
+    5117000
+  ],
   "scale": 200000,
   "tiles_x": 2,
   "tiles_y": 2,
-  "tile_mm": 245,
+  "tile_mm": 237.5,
   "exaggeration": 2.0,
   "base_mm": 3.0,
   "max_height_mm": 180,
@@ -63,25 +68,33 @@
     "skin_depth_mm": 1.2,
     "min_fraction": 0.003,
     "overflow": "swap",
+    "classify_smooth_m": 60,
+    "despeckle_mm2": 3,
     "max_slots": 4,
     "bands": [
       {
         "id": "water",
         "label": "Water",
-        "color": "#1f5fbf",
-        "kind": "water"
+        "color": "#1d4fa3",
+        "kind": "water",
+        "filament": "PLA glossy blue",
+        "slot": 1
       },
       {
         "id": "lowland",
         "label": "Lowland vegetation",
-        "color": "#5aa62c",
-        "from_water_m": 20
+        "color": "#4b5320",
+        "from_water_m": 20,
+        "filament": "Polymaker Panchroma PLA Matte Army Dark Green",
+        "slot": 2
       },
       {
         "id": "upland",
-        "label": "Upland forest",
-        "color": "#2f6b1e",
-        "from_m": 1100
+        "label": "Upland (forest and pasture)",
+        "color": "#7a5534",
+        "from_m": 1100,
+        "filament": "Polymaker Panchroma PLA Matte Wood Brown",
+        "slot": 4
       },
       {
         "id": "rock",
@@ -89,13 +102,16 @@
         "color": "#8b8b8b",
         "from_m": 2000,
         "slope_deg": 40,
-        "slope_from_m": 1400
+        "slope_from_m": 1400,
+        "filament": "PLA Matte Grey",
+        "slot": 3
       },
       {
         "id": "snow",
         "label": "Snow",
         "color": "#f4f4f4",
-        "from_m": 2900
+        "from_m": 2900,
+        "filament": "PLA white (manual swap on the Mont Blanc tile)"
       }
     ]
   },
@@ -106,5 +122,81 @@
     "filament_presets": [],
     "extra_args": [],
     "timeout_s": 3600
+  },
+  "overlay": {
+    "enabled": true,
+    "window_mm": [
+      475,
+      475
+    ],
+    "margin_mm": 9.0,
+    "bottom_margin_mm": 15.0,
+    "grid_crs": "EPSG:25832",
+    "grid_m": 10000,
+    "grid_letters": true,
+    "contour_m": 200,
+    "index_contour_m": 1000,
+    "contour_smooth_m": 100,
+    "contour_min_len_mm": 6,
+    "title": "LAC LÉMAN & THE MONT BLANC MASSIF",
+    "subtitle": "Geneva · Lausanne · Annecy · Chamonix",
+    "places": [
+      "city",
+      "town"
+    ],
+    "symbols": [
+      "peak",
+      "airport",
+      "ferry",
+      "railway",
+      "motorway"
+    ],
+    "line_mm": 0.18,
+    "max_peaks": 40,
+    "peak_min_ele_m": 1500,
+    "labels": [
+      {
+        "text": "LAC LÉMAN",
+        "lon": 6.56,
+        "lat": 46.43,
+        "size": 6.0,
+        "spacing": 2.0,
+        "angle": -6
+      },
+      {
+        "text": "Lac d'Annecy",
+        "lon": 6.195,
+        "lat": 45.84,
+        "size": 2.6,
+        "spacing": 0.3,
+        "angle": -60
+      },
+      {
+        "text": "CHABLAIS",
+        "lon": 6.62,
+        "lat": 46.24,
+        "size": 3.4,
+        "spacing": 1.6
+      },
+      {
+        "text": "ARAVIS",
+        "lon": 6.45,
+        "lat": 45.93,
+        "size": 3.0,
+        "spacing": 1.4,
+        "angle": -55
+      },
+      {
+        "text": "JURA",
+        "lon": 6.12,
+        "lat": 46.5,
+        "size": 3.4,
+        "spacing": 2.0,
+        "angle": -40
+      }
+    ],
+    "peak_spacing_mm": 22,
+    "town_city_gap_m": 7000,
+    "airport_require_iata": true
   }
 }

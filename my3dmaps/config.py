@@ -315,7 +315,12 @@ class OverlayConfig:
                                                          "ferry", "railway", "motorway"])
     font_family: str = "Helvetica, Arial, 'Liberation Sans', sans-serif"
     line_mm: float = 0.18  # thinnest printed line (film printers manage ~0.1 mm)
-    labels: list[dict] = field(default_factory=list)  # hand-placed names: {text, e, n (grid_crs m), size, angle, italic, spacing}
+    labels: list[dict] = field(default_factory=list)  # hand-placed names: {text, e, n (grid_crs m) or lon, lat, size, angle, italic, spacing}
+    max_peaks: int = 0  # label at most this many peaks, highest first (0 = all that fit)
+    peak_min_ele_m: float = 0.0  # skip peaks below this elevation (0 = off)
+    peak_spacing_mm: float = 0.0  # no two labelled peaks closer than this on the film (0 = off)
+    town_city_gap_m: float = 0.0  # drop towns/suburbs/villages this close to a city (ground metres; 0 = off)
+    airport_require_iata: bool = False  # only airports with an IATA code (drops altiports and airfields)
 
 
 @dataclass

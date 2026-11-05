@@ -210,3 +210,54 @@ def test_suggested_relief_scales_with_tile_size():
     small = suggest_exaggeration(ProjectConfig(scale=250000, tile_mm=200.0), 4000.0)
     big = suggest_exaggeration(ProjectConfig(scale=250000, tile_mm=245.0), 4000.0)
     assert big > small
+
+
+def test_speck_of_a_band_folds_into_the_band_below(synth):
+    """A summit just over the snowline must not cost a colour (or a manual swap) for a few cells."""
+    cfg, grid, elev, water = synth
+    cfg.palette.overflow = "swap"
+    snow = cfg.palette.band("snow")
+    cfg.palette.min_fraction = 0.0
+    elev = elev.copy()
+    snow.from_m = float(elev.max()) + 10.0
+    elev[np.unravel_index(np.argmax(elev), elev.shape)] += 60.0  # one summit node, ~0.8 mm of slab above the skin
+
+    def colours(despeckle):
+        cfg.palette.despeckle_mm2 = despeckle
+        cls = classify(cfg, grid, elev, water)
+        tb = build_tile(cfg, grid, cls, 1, 0, 2.0, float(elev.min()))
+        for o in tb.objects:
+            assert edge_manifold_report(o.mesh)["boundary_edges"] == 0, o.name
+        return {o.color for o in tb.objects}, sum(signed_volume(o.mesh) for o in tb.objects)
+
+    with_speck, v0 = colours(0.0)
+    folded, v1 = colours(60.0)
+    assert snow.color in with_speck
+    assert snow.color not in folded
+    assert abs(v0 - v1) / v0 < 1e-9  # same solid, only recoloured
+
+
+def test_mgrs_square_letters():
+    from my3dmaps.overlay import mgrs_band, mgrs_square_letters, utm_zone_of
+
+    assert utm_zone_of("EPSG:25832") == 32 and utm_zone_of("EPSG:32631") == 31 and utm_zone_of("EPSG:27700") is None
+    assert mgrs_square_letters(334201, 5077665, 32) == "LR"  # Mont Blanc: 32T LR
+    assert mgrs_band(45.83) == "T"
+
+
+def test_pinned_slots_survive_a_manual_swap(synth):
+    cfg, grid, elev, water = synth
+    cfg.palette.overflow = "swap"
+    pins = {"water": 1, "lowland": 2, "rock": 3, "upland": 4}
+    cfg.palette.bands = [b for b in cfg.palette.bands if b.id != "sand"]  # every starting colour pinned
+    for b in cfg.palette.bands:
+        b.slot = pins.get(b.id)
+    cls = classify(cfg, grid, elev, water)
+    tb = build_tile(cfg, grid, cls, 1, 0, 2.0, float(elev.min()))
+    assert tb.plan.swaps
+    col = {b.id: b.color for b in cfg.palette.bands}
+    for bid, sl in pins.items():
+        if col[bid] in tb.plan.initial:
+            assert tb.plan.initial[sl - 1] == col[bid], bid
+    for sw in tb.plan.swaps:
+        assert tb.plan.slots[sw.to_color] == sw.slot

@@ -119,12 +119,22 @@ def build_tile(cfg: ProjectConfig, grid: Grid, cls: Classification, tx: int, ty:
         t = cfg.base_mm if not math.isfinite(lower) else float(z_of(lower, cfg, z_datum_m, exaggeration))
         thr.append(max(t, cfg.base_mm))
     thr_upper = thr[1:] + [math.inf]
+    # a band that only pokes through on this tile as a speck (a summit just over the snowline) would
+    # cost a colour - or a manual swap - for a few cells: under despeckle_mm2 of slab and with no skin
+    # of its own here, its slab takes the colour of the band below
+    cell_area = (cfg.tile_w_mm / (e.shape[1] - 1)) * (cfg.tile_h_mm / (e.shape[0] - 1))
+    slab_color = {}
     for k, bi in enumerate(idx):
         lo, hi = thr[k], thr_upper[k]
         top = np.clip(ez_sub, lo, hi)
         bot = np.full_like(top, lo)
         cell_has = (np.maximum.reduce([top[:-1, :-1], top[:-1, 1:], top[1:, :-1], top[1:, 1:]]) > lo + 0.02)
-        add(cls.bands[bi].color, cls.bands[bi].id, sheet_mesh(xs, ys, top, bot, cell_has))
+        color, bid = cls.bands[bi].color, cls.bands[bi].id
+        if (k > 0 and cfg.palette.despeckle_mm2 > 0 and cell_has.any()
+                and cell_has.sum() * cell_area < cfg.palette.despeckle_mm2 and not (cells_cls == bi).any()):
+            color, bid = slab_color[k - 1]
+        slab_color[k] = (color, bid)
+        add(color, bid, sheet_mesh(xs, ys, top, bot, cell_has))
 
     # surface skins
     for bi, band in enumerate(cls.bands):
@@ -170,6 +180,18 @@ def build_tile(cfg: ProjectConfig, grid: Grid, cls: Classification, tx: int, ty:
         for c in colors:
             initial[pinned[c] - 1] = c
         plan.initial = initial
+    elif plan.feasible and plan.swaps and all(c in pinned for c in plan.initial):
+        # with manual swaps the planner decides which slot is freed, but the starting colours can still be
+        # renumbered onto their pinned slots (colours swapped in later inherit the slot they replace)
+        perm = {k + 1: pinned[c] for k, c in enumerate(plan.initial)}
+        if len(set(perm.values())) == len(perm) and max(perm.values()) <= cfg.palette.max_slots:
+            plan.slots = {c: perm[sl] for c, sl in plan.slots.items()}
+            initial = [""] * max(perm.values())
+            for k, c in enumerate(plan.initial):
+                initial[perm[k + 1] - 1] = c
+            plan.initial = initial
+            for sw in plan.swaps:
+                sw.slot = perm[sw.slot]
     for o in objects:
         o.extruder = plan.slots.get(o.color, 0) or 1
 

@@ -155,7 +155,7 @@ def build_tiles(cfg: ProjectConfig, terrain: Terrain, cls: Classification, progr
 
 def _plan_text(cfg: ProjectConfig, tiles: list[TileBuild], cls: Classification, terrain_crs: str = "") -> str:
     lines = [f"my3dmaps print plan for '{cfg.name}'", "=" * 60, "",
-             f"Scale 1:{cfg.scale:.0f}, {cfg.tiles_x}x{cfg.tiles_y} tiles of {cfg.tile_w_mm:.0f} x {cfg.tile_h_mm:.0f} mm "
+             f"Scale 1:{cfg.scale:.0f}, {cfg.tiles_x}x{cfg.tiles_y} tiles of {cfg.tile_w_mm:g} x {cfg.tile_h_mm:g} mm "
              f"({cfg.tile_m / 1000:.2f} x {cfg.tile_h_m / 1000:.2f} km per tile; whole model "
              f"{cfg.model_mm[0]:.0f} x {cfg.model_mm[1]:.0f} mm), height exaggeration {tiles[0].exaggeration:.2f}x" if tiles else "",
              f"Projection {terrain_crs}" if tiles else "",

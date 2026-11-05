@@ -301,7 +301,34 @@ def text_width(text: str, size: float, bold: bool = False, spacing: float = 0.0,
 
 
 # ---------------------------------------------------------------------------
-# OS National Grid letters
+# 100 km square letters: OS National Grid, or MGRS on UTM grids (WGS 84 or ETRS89)
+
+def utm_zone_of(crs: str) -> int | None:
+    """UTM zone number for EPSG:326zz / 327zz (WGS 84) or 258zz (ETRS89), else None."""
+    code = crs.upper().replace("EPSG:", "")
+    if not code.isdigit():
+        return None
+    c = int(code)
+    if 32601 <= c <= 32660 or 32701 <= c <= 32760:
+        return c % 100
+    if 25828 <= c <= 25838:
+        return c - 25800
+    return None
+
+
+def mgrs_square_letters(e: float, n: float, zone: int) -> str:
+    """MGRS 100 km square letters for UTM metres (northern hemisphere), e.g. 'LR' for Mont Blanc in 32T."""
+    col = int(e // 100000)
+    if not 1 <= col <= 8:
+        return ""
+    cols = ("ABCDEFGH", "JKLMNPQR", "STUVWXYZ")[(zone - 1) % 3]
+    rows = "ABCDEFGHJKLMNPQRSTUV"
+    return cols[col - 1] + rows[(int(n // 100000) + (5 if zone % 2 == 0 else 0)) % 20]
+
+
+def mgrs_band(lat: float) -> str:
+    return "CDEFGHJKLMNPQRSTUVWX"[min(max(int((lat + 80) // 8), 0), 19)]
+
 
 def os_square_letters(e: float, n: float) -> str:
     """Two-letter OS 100 km square for National Grid metres (e.g. 'SJ')."""
@@ -397,6 +424,11 @@ def build_overlay(cfg: ProjectConfig, grid: Grid, elev: np.ndarray, out_path: st
     order = ["city", "town", "suburb", "village", "island", "islet"]
     pts = [p for p in osm.points if p["kind"] in place_style and p["kind"] in set(ov.places) | {"island", "islet"}
            and p["name"]]
+    if ov.town_city_gap_m > 0:  # suburbs crowd round a city's name at small scales
+        gap = ov.town_city_gap_m * cfg.mm_per_m
+        cities = [(p["x"], p["y"]) for p in pts if p["kind"] == "city"]
+        pts = [p for p in pts if p["kind"] in ("city", "island", "islet")
+               or all(math.hypot(p["x"] - cx, p["y"] - cy) > gap for cx, cy in cities)]
     pts.sort(key=lambda p: (order.index(p["kind"]), -float(p["tags"].get("population", 0) or 0)
                             if str(p["tags"].get("population", "0")).isdigit() else 0))
     names_svg: list[str] = []
@@ -437,8 +469,26 @@ def build_overlay(cfg: ProjectConfig, grid: Grid, elev: np.ndarray, out_path: st
                 return True
         return False
 
-    for p in osm.points:
+    def _ele(p):
+        try:
+            return float(str(p["tags"].get("ele", "")).replace(",", ".").split()[0].rstrip("m"))
+        except (ValueError, IndexError):
+            return -1e9
+
+    # peaks: highest first (in the Alps OSM names thousands), above peak_min_ele_m, at most max_peaks
+    peaks = sorted((p for p in osm.points if p["kind"] == "peak"), key=lambda p: -_ele(p))
+    peaks = [p for p in peaks if not ov.peak_min_ele_m or _ele(p) >= ov.peak_min_ele_m]
+    n_peaks = 0
+    placed_peaks: list[tuple[float, float]] = []
+    for p in peaks + [p for p in osm.points if p["kind"] != "peak"]:
         k, x, y = p["kind"], p["x"], p["y"]
+        if k == "peak" and ov.max_peaks and n_peaks >= ov.max_peaks:
+            continue
+        if k == "peak" and ov.peak_spacing_mm and any(math.hypot(x - qx, y - qy) < ov.peak_spacing_mm
+                                                      for qx, qy in placed_peaks):
+            continue  # a lower summit of a massif already labelled
+        if k == "airport" and ov.airport_require_iata and not p["tags"].get("iata"):
+            continue  # altiports, glacier strips, airfields
         if k not in want or not (ix0 + 1 < x < ix1 - 1 and iy0 + 1 < y < iy1 - 1):
             continue
         r = 0.9
@@ -454,6 +504,8 @@ def build_overlay(cfg: ProjectConfig, grid: Grid, elev: np.ndarray, out_path: st
                        f'<path d="M{_f(x - 1.1)} {_f(y - 0.9)} L{_f(x + 1.1)} {_f(y - 0.3)} M{_f(x - 1.1)} {_f(y - 0.3)} '
                        f'L{_f(x + 1.1)} {_f(y - 0.9)}" stroke-width="{_f(lw)}"/>')
         elif k == "peak":
+            n_peaks += 1
+            placed_peaks.append((x, y))
             sym.append(f'<path d="M{_f(x)} {_f(y - 0.7)} L{_f(x + 0.7)} {_f(y + 0.5)} L{_f(x - 0.7)} {_f(y + 0.5)} Z" fill="{INK}"/>')
         elif k == "airport":
             # simple aircraft glyph, nose up
@@ -487,8 +539,12 @@ def build_overlay(cfg: ProjectConfig, grid: Grid, elev: np.ndarray, out_path: st
     # hand-placed labels (sea areas, estuaries...): {"text", "e", "n" (grid_crs metres), "size", "italic", "angle", "spacing"}
     if ov.labels:
         to_proj = Transformer.from_crs(ov.grid_crs, grid.crs, always_xy=True)
+        to_ll_proj = Transformer.from_crs("EPSG:4326", grid.crs, always_xy=True)
         for lab in ov.labels:
-            x, y = fr.svg(*to_proj.transform(lab["e"], lab["n"]))
+            if "lon" in lab:
+                x, y = fr.svg(*to_ll_proj.transform(lab["lon"], lab["lat"]))
+            else:
+                x, y = fr.svg(*to_proj.transform(lab["e"], lab["n"]))
             size = float(lab.get("size", 3.0))
             sp = float(lab.get("spacing", 0.4))
             w, h = text_width(lab["text"], size, False, sp), size * 0.75
@@ -612,8 +668,11 @@ def build_overlay(cfg: ProjectConfig, grid: Grid, elev: np.ndarray, out_path: st
         x, y = fr.svg(e, n)
         return LineString(list(zip(x, y)))
 
-    def short(v):  # OS style: km within the 100 km square, 2 digits
-        return f"{int(round(v / 1000)) % 100:02d}"
+    os_grid = "27700" in ov.grid_crs
+    lettered = ov.grid_letters and (os_grid or utm_zone_of(ov.grid_crs) is not None)
+
+    def short(v):  # with square letters (OS / MGRS): km within the 100 km square, 2 digits; else whole km
+        return f"{int(round(v / 1000)) % 100:02d}" if lettered else f"{int(round(v / 1000))}"
 
     for ev in e_lines:
         ln = gline(np.full(30, ev), np.linspace(min(gn) - gm, max(gn) + gm, 30))
@@ -646,11 +705,20 @@ def build_overlay(cfg: ProjectConfig, grid: Grid, elev: np.ndarray, out_path: st
             border.append(text(tx, y + num_size * 0.36, short(nv), num_size, "end" if sgn < 0 else "start"))
 
     # full references at the south-west and north-east corners of the neatline, and square letters
-    if ov.grid_letters and "27700" in ov.grid_crs:
+    zone = utm_zone_of(ov.grid_crs)
+    if ov.grid_letters and ("27700" in ov.grid_crs or zone):
+        g_ll = Transformer.from_crs(ov.grid_crs, "EPSG:4326", always_xy=True)
+
+        def square(e, n):
+            if zone is None:
+                return os_square_letters(e, n)
+            sq = mgrs_square_letters(e, n, zone)
+            return f"{zone}{mgrs_band(g_ll.transform(e, n)[1])} {sq}" if sq else ""
+
         seen = []
         for ev in e_lines[:-1]:
             for nv in n_lines_[:-1]:
-                L = os_square_letters(ev + 1, nv + 1)
+                L = square(ev + 1, nv + 1)
                 if L and L not in [s for s, _, _ in seen]:
                     seen.append((L, ev, nv))
         for L, ev, nv in seen:
@@ -696,23 +764,34 @@ def build_overlay(cfg: ProjectConfig, grid: Grid, elev: np.ndarray, out_path: st
     ex_txt = f" · heights ×{exaggeration:.1f}" if exaggeration else ""
     foot.append(text(ix0, by0 + 6.4, (sub + " · " if sub else "") + f"Scale 1:{int(cfg.scale):,}".replace(",", " ")
                      + ex_txt + f" · contours every {ov.contour_m:g} m", 1.9, "start"))
-    # scale bar: 0-3 km, alternating segments
+    # scale bar: the longest round length up to 70 mm (3 km at 1:50 000, 10 km at 1:200 000), alternating segments
     km_mm = 1000 * cfg.mm_per_m
-    nkm = 3 if km_mm * 3 <= 70 else 1
+    nkm = max([L for L in (1, 2, 3, 5, 10, 20, 25, 50, 100) if L * km_mm <= 70] or [1])
+    seg_km = 0.5 if nkm <= 3 else nkm / 5
+    lab_km = 1 if nkm <= 3 else seg_km
     sbx = (ix0 + ix1) / 2 - nkm * km_mm / 2 + 10
     sby = by0 + 2.0
-    for k in range(nkm * 2):
-        x0 = sbx + k * km_mm / 2
+    for k in range(int(round(nkm / seg_km))):
+        x0 = sbx + k * seg_km * km_mm
         fill = INK if k % 2 == 0 else "none"
-        foot.append(f'<rect x="{_f(x0)}" y="{_f(sby)}" width="{_f(km_mm / 2)}" height="1.1" fill="{fill}" '
+        foot.append(f'<rect x="{_f(x0)}" y="{_f(sby)}" width="{_f(seg_km * km_mm)}" height="1.1" fill="{fill}" '
                     f'stroke-width="{_f(lw)}"/>')
-    for k in range(nkm + 1):
-        foot.append(text(sbx + k * km_mm, sby + 3.6, f"{k}" + (" km" if k == nkm else ""), 1.9))
+    for k in range(int(round(nkm / lab_km)) + 1):
+        v = k * lab_km
+        foot.append(text(sbx + v * km_mm, sby + 3.6, f"{v:g}" + (" km" if k * lab_km >= nkm else ""), 1.9))
+    try:
+        from pyproj import CRS
+        grid_name = f"{CRS.from_user_input(ov.grid_crs).name} ({ov.grid_crs})"
+    except Exception:
+        grid_name = ov.grid_crs
+    if os_grid:
+        grid_name = "British National Grid (EPSG:27700)"
     credits = [
         "Map data © OpenStreetMap contributors, ODbL — openstreetmap.org/copyright",
         "Relief & contours: NASA/USGS SRTM 1″ (public domain) · Sea & lakes: Natural Earth (public domain)",
-        f"Grid: {'British National Grid (EPSG:27700), ' if '27700' in ov.grid_crs else ''}{gm / 1000:g} km squares"
-        " · not Ordnance Survey mapping · made with my3dmaps",
+        f"Grid: {grid_name}, {gm / 1000:g} km squares"
+        + (" · not Ordnance Survey mapping" if os_grid else "")
+        + (" · 100 km squares lettered as MGRS" if lettered and not os_grid else "") + " · made with my3dmaps",
     ]
     for k, c in enumerate(credits):
         foot.append(text(ix1, by0 + 2.3 + k * 2.3, c, 1.6, "end"))

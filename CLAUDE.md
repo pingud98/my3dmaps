@@ -19,7 +19,7 @@ Coding is being done by Fable against this spec. Keep this file the single sourc
 
 ## Tiling
 
-Models are built in **245 × 245 mm modules** (footprint; decision 2026-09-28, originally 200 mm) so that 2 × 2 tiles fill a 50 × 50 cm IKEA frame with a 5 mm border. The user asked for 250 mm, but the CC2's OrcaSlicer profile excludes x 246–256, y 0–20 on the 256 × 256 bed, so 245 mm (placed at x 0.5) is the largest printable square; 3 × 3 of 167 mm and 2 × 3 of 250 × 167 mm were offered and declined. Reasons for tiling:
+Models are built in **245 × 245 mm modules** (the Alps set later shrank to 237.5 mm, see decisions) (footprint; decision 2026-09-28, originally 200 mm) so that 2 × 2 tiles fill a 50 × 50 cm IKEA frame with a 5 mm border. The user asked for 250 mm, but the CC2's OrcaSlicer profile excludes x 246–256, y 0–20 on the 256 × 256 bed, so 245 mm (placed at x 0.5) is the largest printable square; 3 × 3 of 167 mm and 2 × 3 of 250 × 167 mm were offered and declined. Reasons for tiling:
 - Fits the bed with margin.
 - Lets a long/thin region (e.g. a lake shoreline, a valley) be printed as a strip of tiles rather than one oversized model.
 - Lets a larger area (e.g. full Geneva-to-Mont-Blanc transect) be assembled from a 2×2 or 3×3 (etc.) grid of tiles.
@@ -333,6 +333,35 @@ Decisions made while implementing (these refine the sections above):
   Masks (not white ink) keep the film clear under labels.  Long-distance ferry
   routes are dropped (they only trace the shipping channel).  Contour tracing
   is a small marching-squares in numpy (no skimage in the venv).
+- **Alps print set (2026-11-05, after the Liverpool tiles were printed):**
+  `presets/geneva.json` → `out/alps/`.  Frame is an IKEA SANNAHED 50 × 50 cm
+  box frame (6 cm deep) whose visible window is a little under 50 cm (~47.4 cm
+  scaled off IKEA's drawing), so the relief is **47.5 × 47.5 cm** (user
+  decision; 46.5 was the fallback): 2 × 2 tiles of 237.5 mm at 1:200,000,
+  2.0×, ≤ 49 mm.  Projected on **ETRS89 / UTM 32N (EPSG:25832)**, the
+  European reference grid (the user asked for a European datum, not OS), with
+  `center_xy` (311000, 5117000).  Filaments are the user's spools, pinned:
+  1 glossy blue (water+base), 2 matte army dark green (lowland), 3 matte grey
+  (rock), 4 matte wood brown (upland); white is swapped into slot 2 for snow
+  on the Mont Blanc tile only (printed last).  Changes made for it:
+  (1) `classify_smooth_m` 60 / `despeckle_mm2` 3 as for Liverpool;
+  (2) `tile.build_tile`: an elevation band whose slab covers less than
+  `despeckle_mm2` on a tile and has no skin there takes the band below's
+  colour (a 42-triangle snow cap on tile x1_y1 had cost a manual swap);
+  (3) slot pinning now also applies to tiles with manual swaps when every
+  starting colour is pinned (planner slots are renumbered; swapped-in colours
+  inherit the slot they replace).
+- **Overlay generalised (2026-11-05):** MGRS 100 km square letters
+  ("32T LR") on UTM grids (WGS 84 326zz or ETRS89 258zz), the counterpart of
+  the OS letters, with 2-digit km grid numbers; scale bar picks the longest
+  round length ≤ 70 mm (10 km at 1:200k); credits name the grid CRS; hand
+  labels may be given as lon/lat.  New `overlay` options for small scales:
+  `max_peaks`, `peak_min_ele_m`, `peak_spacing_mm` (highest peaks first, at
+  least this far apart; otherwise every Mont Blanc summit got a label),
+  `town_city_gap_m` (drops suburbs crowding a city name) and
+  `airport_require_iata` (drops altiports/glacier strips).  Alps settings:
+  10 km grid, 200 m contours (1000 m index), 40 peaks ≥ 1500 m 22 mm apart,
+  cities + towns, Lac Léman / Lac d'Annecy / Chablais / Aravis / Jura labels.
 - **Not done / next:** headless-slicer verification on a real install;
   urban-heuristic for Liverpool (elevation+slope reads fine as tidal flats +
   low hills, so no extra land-cover layer was needed).  Lossy terrain
